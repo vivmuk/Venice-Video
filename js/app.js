@@ -401,7 +401,7 @@ function handleImageUpload(e) {
   }
 }
 
-function processImageFile(file) {
+async function processImageFile(file) {
   if (!file.type.startsWith('image/')) {
     showToast('Please upload an image file', 'error');
     return;
@@ -412,18 +412,80 @@ function processImageFile(file) {
     return;
   }
 
+  // Show preview immediately
   const reader = new FileReader();
   reader.onload = (e) => {
-    appState.uploadedImage = e.target.result;
-    appState.uploadedImageUrl = null;
-
+    const dataUrl = e.target.result;
     document.getElementById('upload-content').style.display = 'none';
     document.getElementById('upload-preview').style.display = 'block';
-    document.getElementById('preview-image').src = e.target.result;
+    document.getElementById('preview-image').src = dataUrl;
     document.getElementById('upload-zone').classList.add('has-image');
     document.getElementById('image-url').value = '';
   };
   reader.readAsDataURL(file);
+
+  // Upload image to hosting service to get a URL (don't send base64 to API)
+  try {
+    showToast('Uploading image to hosting service...', 'info');
+    const imageUrl = await uploadImageToHosting(file);
+    
+    if (imageUrl) {
+      appState.uploadedImageUrl = imageUrl;
+      appState.uploadedImage = null; // Don't store base64 - it's too large
+      showToast('Image uploaded successfully!', 'success');
+    } else {
+      throw new Error('Failed to upload image');
+    }
+  } catch (error) {
+    console.error('Image upload error:', error);
+    showToast('Failed to upload image. Please provide an image URL instead, or try again.', 'error');
+    // Clear the uploaded URL so user knows it didn't work
+    appState.uploadedImageUrl = null;
+    appState.uploadedImage = null;
+  }
+}
+
+// Upload image to a free hosting service
+// Using imgbb.com - free image hosting
+async function uploadImageToHosting(file) {
+  // Convert file to base64 for imgbb API
+  const base64 = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      // Remove data:image/...;base64, prefix
+      const base64String = reader.result.split(',')[1];
+      resolve(base64String);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
+  try {
+    const apiKey = 'feba2c30115b4e434ddee77d34147f4a';
+
+    const response = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: `image=${encodeURIComponent(base64)}`
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error?.message || `Upload failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (data.success && data.data && data.data.url) {
+      return data.data.url;
+    } else {
+      throw new Error('Invalid response from image hosting');
+    }
+  } catch (error) {
+    console.error('Image hosting error:', error);
+    throw error;
+  }
 }
 
 function removeImage(e) {
@@ -532,10 +594,9 @@ async function handleGenerate() {
       const imageUrl = document.getElementById('image-url').value.trim();
       if (imageUrl) {
         params.image_url = imageUrl;
-      } else if (appState.uploadedImage) {
-        // Use the uploaded image data URL directly
-        // The API should accept data URLs (data:image/jpeg;base64,...)
-        params.image_url = appState.uploadedImage;
+      } else if (appState.uploadedImageUrl) {
+        // Use the uploaded image URL (from hosting service)
+        params.image_url = appState.uploadedImageUrl;
       } else {
         // No image provided
         hideLoading();
@@ -738,9 +799,9 @@ async function handleEstimate() {
       const imageUrl = document.getElementById('image-url').value.trim();
       if (imageUrl) {
         params.image_url = imageUrl;
-      } else if (appState.uploadedImage) {
-        // Use the uploaded image data URL directly for estimate
-        params.image_url = appState.uploadedImage;
+      } else if (appState.uploadedImageUrl) {
+        // Use the uploaded image URL (from hosting service)
+        params.image_url = appState.uploadedImageUrl;
       } else {
         showToast('Please upload an image or provide an image URL', 'error');
         estimateBtn.disabled = false;
