@@ -32,16 +32,20 @@ class VeniceAPI {
         return this.handleError(response);
       }
 
-      // Check if response is video
+      // Check if response is video - clone the response so we can read it multiple times
       const contentType = response.headers.get('Content-Type');
       if (contentType && contentType.includes('video/mp4')) {
+        // Clone the response before reading to avoid "body stream already read" error
+        const blob = await response.blob();
+        const videoUrl = URL.createObjectURL(blob);
         return {
           status: 'completed',
-          video_blob: await response.blob(),
-          video_url: URL.createObjectURL(await response.blob())
+          video_blob: blob,
+          video_url: videoUrl
         };
       }
 
+      // For JSON responses, read the body
       return await response.json();
     } catch (error) {
       clearTimeout(timeoutId);
@@ -220,10 +224,10 @@ class VeniceAPI {
       body: JSON.stringify(requestBody)
     });
 
-    console.log('Retrieve response:', JSON.stringify(data, null, 2));
-
     // Handle video blob response (already handled in request method)
+    // If data has video_url, it means the video is ready
     if (data.status === 'completed' && data.video_url) {
+      console.log('Video completed!', data.video_url);
       return {
         status: 'completed',
         progress: 100,
@@ -231,6 +235,16 @@ class VeniceAPI {
         video_blob: data.video_blob,
         estimated_time_remaining: 0
       };
+    }
+
+    // For processing status, log minimal info to avoid cluttering console
+    if (data.status === 'PROCESSING' || data.status === 'processing') {
+      const progress = data.average_execution_time && data.execution_duration
+        ? Math.min(95, Math.round((data.execution_duration / data.average_execution_time) * 100))
+        : 0;
+      console.log(`Processing... ${progress}% (${data.execution_duration}ms / ${data.average_execution_time}ms)`);
+    } else {
+      console.log('Retrieve response:', JSON.stringify(data, null, 2));
     }
 
     // Calculate progress if we have timing info
