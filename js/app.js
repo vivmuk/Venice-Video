@@ -15,6 +15,7 @@ const appState = {
   isProcessing: false,
   queueId: null,
   videoUrl: null,
+  videoBlob: null, // Store the blob for download
   selectedDuration: null,
   selectedResolution: null,
   selectedAspectRatio: '16:9',
@@ -620,6 +621,7 @@ async function pollForCompletion(api, queueId, modelId = null) {
       if (status.status === 'completed' && status.video_url) {
         // Success!
         appState.videoUrl = status.video_url;
+        appState.videoBlob = status.video_blob; // Store blob for download
         appState.isProcessing = false;
 
         document.getElementById('status-badge').className = 'status-badge status-success';
@@ -629,7 +631,23 @@ async function pollForCompletion(api, queueId, modelId = null) {
 
         // Show video section
         document.getElementById('video-section').classList.remove('hidden');
-        document.getElementById('video-player').src = status.video_url;
+        const videoPlayer = document.getElementById('video-player');
+        
+        // Set video source - use blob URL
+        if (status.video_url && status.video_url.startsWith('blob:')) {
+          videoPlayer.src = status.video_url;
+        } else if (status.video_blob) {
+          // Create blob URL if not already created
+          const blobUrl = URL.createObjectURL(status.video_blob);
+          videoPlayer.src = blobUrl;
+          appState.videoUrl = blobUrl; // Update stored URL
+        }
+
+        // Handle video load errors
+        videoPlayer.onerror = (e) => {
+          console.error('Video load error:', e);
+          showErrorModal('Failed to load video. You can still download it using the Download button.');
+        };
 
         showToast('Video generated successfully!', 'success');
         return;
@@ -798,11 +816,20 @@ function handleDownload() {
 function handleNewGeneration() {
   appState.isProcessing = false;
   appState.queueId = null;
+  
+  // Clean up blob URLs to prevent memory leaks
+  if (appState.videoUrl && appState.videoUrl.startsWith('blob:')) {
+    URL.revokeObjectURL(appState.videoUrl);
+  }
+  
   appState.videoUrl = null;
+  appState.videoBlob = null;
 
   document.getElementById('progress-section').classList.add('hidden');
   document.getElementById('video-section').classList.add('hidden');
-  document.getElementById('video-player').src = '';
+  const videoPlayer = document.getElementById('video-player');
+  videoPlayer.src = '';
+  videoPlayer.onerror = null; // Clear error handler
   document.getElementById('progress-fill').style.width = '0%';
   document.getElementById('progress-value').textContent = '0%';
   document.getElementById('status-badge').className = 'status-badge status-processing';
