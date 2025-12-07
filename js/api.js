@@ -60,26 +60,37 @@ class VeniceAPI {
   // Handle API errors
   async handleError(response) {
     let errorData = {};
+    let errorText = '';
     try {
-      const text = await response.text();
-      if (text) {
-        errorData = JSON.parse(text);
+      errorText = await response.text();
+      console.error('Raw API error response:', errorText);
+      if (errorText) {
+        try {
+          errorData = JSON.parse(errorText);
+        } catch (parseError) {
+          // If it's not JSON, use the text as the error message
+          errorData = { message: errorText };
+        }
       }
     } catch (e) {
-      // If parsing fails, errorData remains empty object
+      console.error('Error reading response:', e);
     }
 
     console.error(`API Error ${response.status}:`, {
       status: response.status,
       statusText: response.statusText,
       url: response.url,
-      errorData
+      errorText: errorText,
+      errorData: errorData
     });
 
     // Build detailed error message
-    let errorMessage = errorData.message || errorData.error || 'Invalid request parameters';
+    let errorMessage = errorData.message || errorData.error || errorData.detail || errorText || 'Invalid request parameters';
     if (errorData.details) {
       errorMessage += `: ${JSON.stringify(errorData.details)}`;
+    }
+    if (errorData.errors) {
+      errorMessage += `: ${JSON.stringify(errorData.errors)}`;
     }
 
     const errorMessages = {

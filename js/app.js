@@ -380,16 +380,27 @@ async function handleGenerate() {
     generateBtn.innerHTML = '<span class="spinner"></span> Submitting...';
     showLoading('Submitting video generation request...');
 
-    // Build parameters
+    // Build parameters - start with required fields only
     const params = {
-      model: appState.selectedModel.id,
-      duration: appState.selectedDuration,
-      aspect_ratio: appState.selectedAspectRatio,
-      resolution: appState.selectedResolution
+      model: appState.selectedModel.id
     };
 
+    // Add duration if valid
+    if (appState.selectedDuration) {
+      params.duration = appState.selectedDuration;
+    }
+
+    // Add prompt for text-to-video
     if (appState.mode === 'text-to-video') {
-      params.prompt = document.getElementById('prompt').value.trim();
+      const prompt = document.getElementById('prompt').value.trim();
+      if (!prompt) {
+        showToast('Please enter a prompt', 'error');
+        generateBtn.disabled = false;
+        generateBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> Generate Video';
+        hideLoading();
+        return;
+      }
+      params.prompt = prompt;
     } else {
       // For image-to-video, we need to handle the image
       const imageUrl = document.getElementById('image-url').value.trim();
@@ -514,15 +525,25 @@ async function handleEstimate() {
     estimateBtn.disabled = true;
     estimateBtn.innerHTML = '<span class="spinner"></span> Calculating...';
 
+    // Build parameters - start with required fields only
     const params = {
-      model: appState.selectedModel.id,
-      duration: appState.selectedDuration,
-      aspect_ratio: appState.selectedAspectRatio,
-      resolution: appState.selectedResolution
+      model: appState.selectedModel.id
     };
 
+    // Add duration if valid
+    if (appState.selectedDuration) {
+      params.duration = appState.selectedDuration;
+    }
+
     if (appState.mode === 'text-to-video') {
-      params.prompt = document.getElementById('prompt').value.trim();
+      const prompt = document.getElementById('prompt').value.trim();
+      if (!prompt) {
+        showToast('Please enter a prompt', 'error');
+        estimateBtn.disabled = false;
+        estimateBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg> Estimate Cost';
+        return;
+      }
+      params.prompt = prompt;
     } else {
       // For image-to-video
       const imageUrl = document.getElementById('image-url').value.trim();
@@ -534,6 +555,15 @@ async function handleEstimate() {
         params.prompt = motionPrompt;
       }
     }
+
+    // Temporarily removing aspect_ratio and resolution to debug 400 errors
+    // These will be re-added once we confirm the basic request works
+    // if (appState.selectedAspectRatio && appState.selectedAspectRatio !== '16:9') {
+    //   params.aspect_ratio = appState.selectedAspectRatio;
+    // }
+    // if (appState.selectedResolution) {
+    //   params.resolution = appState.selectedResolution;
+    // }
 
     const api = new VeniceAPI(token);
     const quote = await api.quote(params);
