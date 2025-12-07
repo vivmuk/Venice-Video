@@ -527,7 +527,6 @@ async function handleGenerate() {
   if (!validateForm()) return;
 
   const generateBtn = document.getElementById('generate-btn');
-  const token = document.getElementById('api-token').value.trim();
 
   try {
     // Show loading
@@ -753,7 +752,6 @@ async function handleEstimate() {
   if (!validateForm()) return;
 
   const estimateBtn = document.getElementById('estimate-btn');
-  const token = document.getElementById('api-token').value.trim();
 
   try {
     estimateBtn.disabled = true;
