@@ -1,16 +1,14 @@
 // Venice Video API Integration Class
+// Now uses server-side proxy endpoints (API token is stored on server)
 
 class VeniceAPI {
-  constructor(token) {
-    if (!token) {
-      throw new Error('API token is required');
-    }
-    this.token = token;
-    this.baseUrl = 'https://api.venice.ai/api/v1/video';
-    this.modelsBaseUrl = 'https://api.venice.ai/api/v1';
+  constructor() {
+    // No token needed - server handles authentication
+    this.baseUrl = '/api/video'; // Use server proxy
+    this.modelsBaseUrl = '/api'; // Use server proxy
   }
 
-  // Helper method for API requests
+  // Helper method for API requests (now goes through server proxy)
   async request(endpoint, options = {}) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
@@ -19,7 +17,6 @@ class VeniceAPI {
       const response = await fetch(`${this.baseUrl}${endpoint}`, {
         ...options,
         headers: {
-          'Authorization': `Bearer ${this.token}`,
           'Content-Type': 'application/json',
           ...options.headers
         },
@@ -358,12 +355,11 @@ class VeniceAPI {
     };
   }
 
-  // Fetch available video models from API
+  // Fetch available video models from API (via server proxy)
   async getModels() {
     try {
-      const response = await fetch(`${this.modelsBaseUrl}/models?type=video`, {
+      const response = await fetch(`${this.modelsBaseUrl}/models`, {
         headers: {
-          'Authorization': `Bearer ${this.token}`,
           'Content-Type': 'application/json'
         }
       });

@@ -19,7 +19,6 @@ const appState = {
   selectedDuration: null,
   selectedResolution: null,
   selectedAspectRatio: '16:9',
-  apiToken: null,
   modelsLoaded: false
 };
 
@@ -46,11 +45,8 @@ async function initializeApp() {
     showErrorModal(e.reason?.message || 'An unexpected error occurred');
   });
 
-  // Try to load models if token is available
-  const tokenInput = document.getElementById('api-token');
-  if (tokenInput && tokenInput.value.trim()) {
-    await loadModels(tokenInput.value.trim());
-  }
+  // Load models automatically (API token is on server)
+  await loadModels();
 
   // Render initial models
   renderModels();
@@ -120,7 +116,7 @@ async function loadModels(token) {
     console.log('Models loaded from API:', MODELS);
   } catch (error) {
     console.error('Error loading models:', error);
-    // Fall back to empty models - user will need to enter token
+    showErrorModal('Failed to load models. Please check server configuration and ensure VENICE_API_TOKEN is set in Railway environment variables.');
     appState.modelsLoaded = false;
   }
 }
@@ -337,38 +333,10 @@ function setupPromptCounter() {
     });
   }
 
-  // Setup API token input to load models when token is entered
-  const tokenInput = document.getElementById('api-token');
-  if (tokenInput) {
-    let loadTimeout;
-    tokenInput.addEventListener('input', () => {
-      const token = tokenInput.value.trim();
-      if (token && token.length > 10) {
-        // Debounce - wait 1 second after user stops typing
-        clearTimeout(loadTimeout);
-        loadTimeout = setTimeout(async () => {
-          if (!appState.modelsLoaded || appState.apiToken !== token) {
-            await loadModels(token);
-          }
-        }, 1000);
-      }
-    });
-  }
+  // Models are loaded automatically on initialization (no token input needed)
 }
 
-// Toggle Token Visibility
-function toggleTokenVisibility() {
-  const input = document.getElementById('api-token');
-  const icon = document.getElementById('eye-icon');
-
-  if (input.type === 'password') {
-    input.type = 'text';
-    icon.innerHTML = '<path d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>';
-  } else {
-    input.type = 'password';
-    icon.innerHTML = '<path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>';
-  }
-}
+// Toggle Token Visibility - REMOVED (API token is now on server)
 
 // Image Upload Handlers
 function handleDragOver(e) {
@@ -502,11 +470,6 @@ function removeImage(e) {
 // Validation
 function validateForm() {
   const errors = {};
-  const token = document.getElementById('api-token').value.trim();
-
-  if (!token) {
-    errors['api-token'] = 'API token is required';
-  }
 
   if (!appState.selectedModel) {
     showToast('Please select a model', 'warning');
@@ -640,8 +603,8 @@ async function handleGenerate() {
       params.resolution = appState.selectedResolution;
     }
 
-    // Create API instance and queue
-    const api = new VeniceAPI(token);
+    // Create API instance and queue (no token needed - server handles it)
+    const api = new VeniceAPI();
     const response = await api.queue(params);
 
     if (!response.queue_id) {
@@ -853,7 +816,7 @@ async function handleEstimate() {
       params.resolution = appState.selectedResolution;
     }
 
-    const api = new VeniceAPI(token);
+    const api = new VeniceAPI(); // No token needed - server handles it
     const quote = await api.quote(params);
 
     estimateBtn.disabled = false;
@@ -995,7 +958,6 @@ window.switchMode = switchMode;
 window.selectModel = selectModel;
 window.selectDuration = selectDuration;
 window.selectResolution = selectResolution;
-window.toggleTokenVisibility = toggleTokenVisibility;
 window.handleDragOver = handleDragOver;
 window.handleDragLeave = handleDragLeave;
 window.handleDrop = handleDrop;

@@ -189,24 +189,36 @@ A clean, Swiss-designed interface for generating videos using the Venice AI API.
 
 ### Railway Deployment
 
-1. **Install Dependencies**:
+1. **Install Dependencies** (locally, optional):
    ```bash
    npm install
    ```
 
-2. **Deploy to Railway**:
+2. **Set Environment Variable on Railway**:
+   - Go to your Railway project dashboard
+   - Navigate to the "Variables" tab
+   - Add a new environment variable:
+     - **Name**: `VENICE_API_TOKEN`
+     - **Value**: Your Venice AI API token (get it from venice.ai)
+   - Save the variable
+
+3. **Deploy to Railway**:
    - Connect your GitHub repository to Railway
    - Railway will automatically detect the `package.json` and `server.js`
    - The server will start automatically with the correct CSP headers
-
-3. **Environment Variables** (if needed):
    - Railway will use the PORT environment variable automatically
-   - No additional configuration needed
 
-The server includes proper Content Security Policy headers to allow:
-- Blob URLs for video playback
-- API connections to Venice AI and imgbb.com
-- Google Fonts for styling
+4. **Verify Deployment**:
+   - Check the Railway logs to ensure the server started successfully
+   - You should see: "Server is running on port XXXX" and "Venice API token is configured"
+   - If you see a warning about the token, check your environment variable
+
+The server includes:
+- **Content Security Policy headers** to allow blob URLs for video playback
+- **Server-side API proxy** that keeps your API token secure
+- **Automatic model loading** on page load (no user input needed)
+
+**Important**: The API token is now stored securely on the server and never exposed to the client. Users don't need to enter it.
 
 ## Technical Overview
 
