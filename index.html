@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Venice Video Generator</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect fill='%23c4a77d' width='100' height='100' rx='20'/%3E%3Cpath fill='%23fff' d='M30 25h40v10H30zM25 40h50v5H25zM25 50h50v5H25zM25 60h50v5H25zM35 70h30v5H35z'/%3E%3C/svg%3E">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="header-content">
+                <div class="logo">
+                    <div class="logo-icon">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M15 10L19.5528 7.72361C20.2177 7.39116 21 7.87465 21 8.61803V15.382C21 16.1253 20.2177 16.6088 19.5528 16.2764L15 14M5 18H13C14.1046 18 15 17.1046 15 16V8C15 6.89543 14.1046 6 13 6H5C3.89543 6 3 6.89543 3 8V16C3 17.1046 3.89543 18 5 18Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <h1>Venice <span>Video</span></h1>
+                </div>
+
+                <div class="mode-toggle">
+                    <button class="mode-btn active" data-mode="text-to-video" onclick="switchMode('text-to-video')">
+                        <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10" stroke-linecap="round"/></svg>
+                        Text to Video
+                    </button>
+                    <button class="mode-btn" data-mode="image-to-video" onclick="switchMode('image-to-video')">
+                        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                        Image to Video
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <div class="container">
+            <div class="app-layout">
+                <!-- Main Content Area -->
+                <div class="main-content">
+                    <!-- API Token Card -->
+                    <div class="card" style="margin-bottom: var(--space-xl);">
+                        <div class="form-section">
+                            <label class="form-label">
+                                <svg viewBox="0 0 24 24" width="16" height="16" style="fill: var(--accent-primary); vertical-align: middle; margin-right: 6px;"><path d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+                                API Token
+                                <span class="form-label-hint">(Get yours at venice.ai)</span>
+                            </label>
+                            <div class="api-token-wrapper">
+                                <input type="password" id="api-token" class="form-input" placeholder="Enter your Venice API token" value="lnWNeSg0pA_rQUooNpbfpPDBaj2vJnWol5WqKWrIEF">
+                                <button type="button" class="api-token-toggle" onclick="toggleTokenVisibility()">
+                                    <svg id="eye-icon" viewBox="0 0 24 24"><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                </button>
+                            </div>
+                            <div id="api-token-error" class="field-error"></div>
+                        </div>
+                    </div>
+
+                    <!-- Model Selection Card -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">
+                                <svg viewBox="0 0 24 24"><path d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+                                Select Model
+                            </h2>
+                        </div>
+
+                        <div id="model-grid" class="model-grid">
+                            <!-- Models will be populated by JavaScript -->
+                        </div>
+
+                        <!-- Text-to-Video Input -->
+                        <div id="text-input-section">
+                            <div class="form-section">
+                                <label class="form-label">
+                                    <svg viewBox="0 0 24 24" width="16" height="16" style="fill: var(--accent-primary); vertical-align: middle; margin-right: 6px;"><path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                                    Prompt
+                                    <span class="form-label-hint">(Describe your video)</span>
+                                </label>
+                                <textarea id="prompt" class="form-textarea" placeholder="A cinematic shot of a sunset over mountain peaks, golden hour lighting, smooth camera movement..." rows="4"></textarea>
+                                <div class="prompt-footer">
+                                    <span id="prompt-counter" class="prompt-counter">0 / 5000</span>
+                                </div>
+                                <div id="prompt-error" class="field-error"></div>
+                            </div>
+                        </div>
+
+                        <!-- Image-to-Video Input -->
+                        <div id="image-input-section" class="hidden">
+                            <div class="form-section">
+                                <label class="form-label">
+                                    <svg viewBox="0 0 24 24" width="16" height="16" style="fill: var(--accent-primary); vertical-align: middle; margin-right: 6px;"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                                    Source Image
+                                </label>
+                                <div id="upload-zone" class="upload-zone" ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" onclick="document.getElementById('image-upload').click()">
+                                    <input type="file" id="image-upload" accept="image/*" style="display: none;" onchange="handleImageUpload(event)">
+                                    <div id="upload-content">
+                                        <svg class="upload-icon" viewBox="0 0 24 24"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                                        <p class="upload-text"><strong>Click to upload</strong> or drag and drop</p>
+                                        <p class="upload-hint">PNG, JPG, WEBP up to 10MB</p>
+                                    </div>
+                                    <div id="upload-preview" class="upload-preview" style="display: none;">
+                                        <img id="preview-image" src="" alt="Preview">
+                                        <button type="button" class="upload-remove" onclick="removeImage(event)">&times;</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="or-divider">or paste URL</div>
+
+                            <div class="form-section">
+                                <input type="url" id="image-url" class="form-input" placeholder="https://example.com/image.jpg">
+                                <div id="image-url-error" class="field-error"></div>
+                            </div>
+
+                            <div class="form-section">
+                                <label class="form-label">
+                                    Motion Prompt <span class="form-label-hint">(Optional - describe the motion)</span>
+                                </label>
+                                <textarea id="motion-prompt" class="form-textarea" placeholder="Gentle wind blowing through hair, subtle camera push in..." rows="2"></textarea>
+                            </div>
+                        </div>
+
+                        <!-- Parameters -->
+                        <div class="form-section">
+                            <label class="form-label">Duration</label>
+                            <div id="duration-pills" class="param-pills">
+                                <!-- Duration options populated by JS -->
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <label class="form-label">Aspect Ratio</label>
+                            <div class="param-pills">
+                                <button type="button" class="param-pill selected" data-ratio="16:9">16:9</button>
+                                <button type="button" class="param-pill" data-ratio="9:16">9:16</button>
+                                <button type="button" class="param-pill" data-ratio="1:1">1:1</button>
+                                <button type="button" class="param-pill" data-ratio="4:3">4:3</button>
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <label class="form-label">Resolution</label>
+                            <div id="resolution-pills" class="param-pills">
+                                <!-- Resolution options populated by JS -->
+                            </div>
+                        </div>
+
+                        <!-- Toggles -->
+                        <div id="audio-toggle" class="toggle-wrapper hidden">
+                            <label class="toggle-label">
+                                <svg viewBox="0 0 24 24"><path d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
+                                Generate with Audio
+                            </label>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="audio-checkbox">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+
+                        <div class="toggle-wrapper">
+                            <label class="toggle-label">
+                                <svg viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                                Auto-delete after download
+                            </label>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="auto-delete-checkbox" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sidebar -->
+                <div class="sidebar-panel">
+                    <!-- Selected Model Info -->
+                    <div class="card" style="margin-bottom: var(--space-lg);">
+                        <div class="card-header">
+                            <h3 class="card-title">
+                                <svg viewBox="0 0 24 24"><path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                Selected Model
+                            </h3>
+                        </div>
+                        <div id="selected-model-info">
+                            <p style="color: var(--text-muted); font-size: 0.9rem;">Select a model to see details</p>
+                        </div>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="card">
+                        <div class="action-buttons">
+                            <button id="generate-btn" class="btn btn-primary btn-block" onclick="handleGenerate()">
+                                <svg viewBox="0 0 24 24"><path d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                Generate Video
+                            </button>
+                            <button id="estimate-btn" class="btn btn-secondary btn-block" onclick="handleEstimate()">
+                                <svg viewBox="0 0 24 24"><path d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+                                Estimate Cost
+                            </button>
+                        </div>
+
+                        <!-- Progress Section (hidden by default) -->
+                        <div id="progress-section" class="progress-section hidden">
+                            <div class="queue-info">
+                                <div class="queue-row">
+                                    <span class="queue-label">Queue ID</span>
+                                    <span id="queue-id" class="queue-value">-</span>
+                                </div>
+                                <div class="queue-row">
+                                    <span class="queue-label">Status</span>
+                                    <span id="status-badge" class="status-badge status-processing">Processing</span>
+                                </div>
+                                <div class="queue-row">
+                                    <span class="queue-label">Time Remaining</span>
+                                    <span id="time-remaining" class="queue-value">Calculating...</span>
+                                </div>
+                            </div>
+                            <div class="progress-header">
+                                <span class="progress-label">Progress</span>
+                                <span id="progress-value" class="progress-value">0%</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div id="progress-fill" class="progress-fill"></div>
+                            </div>
+                            <button id="cancel-btn" class="btn btn-secondary btn-block" style="margin-top: var(--space-lg);" onclick="handleCancel()">
+                                Cancel
+                            </button>
+                        </div>
+
+                        <!-- Video Result Section (hidden by default) -->
+                        <div id="video-section" class="hidden" style="margin-top: var(--space-lg);">
+                            <div class="video-preview">
+                                <video id="video-player" class="video-player" controls></video>
+                            </div>
+                            <div class="action-buttons">
+                                <button id="download-btn" class="btn btn-primary btn-block" onclick="handleDownload()">
+                                    <svg viewBox="0 0 24 24"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                                    Download Video
+                                </button>
+                                <button class="btn btn-secondary btn-block" onclick="handleNewGeneration()">
+                                    <svg viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                                    New Generation
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Toast Container -->
+    <div id="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+    <!-- Loading Indicator -->
+    <div id="loading-indicator" role="status" aria-live="polite">
+        <div class="loading-spinner-large"></div>
+        <p id="loading-text">Processing...</p>
+    </div>
+
+    <!-- Error Modal -->
+    <div id="error-modal" class="modal-overlay error-modal">
+        <div class="error-content">
+            <h3>Error</h3>
+            <p id="error-message"></p>
+            <button class="btn btn-primary" onclick="closeErrorModal()">OK</button>
+        </div>
+    </div>
+
+    <script src="js/state.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
