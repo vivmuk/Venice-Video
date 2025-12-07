@@ -1,40 +1,9 @@
 // Venice Video Generator - Main Application
 
-// Model Data
-const MODELS = {
-  'text-to-video': [
-    { id: 'veo3-fast-text-to-video', name: 'Veo3 Fast', badge: 'fast', durations: [4, 6, 8], resolutions: ['720p', '1080p'], audio: true },
-    { id: 'veo3-full-text-to-video', name: 'Veo3 Full', badge: 'full', durations: [4, 6, 8], resolutions: ['720p', '1080p'], audio: true },
-    { id: 'veo3.1-fast-text-to-video', name: 'Veo3.1 Fast', badge: 'fast', durations: [4, 6, 8], resolutions: ['720p', '1080p'], audio: true },
-    { id: 'veo3.1-full-text-to-video', name: 'Veo3.1 Full', badge: 'full', durations: [4, 6, 8], resolutions: ['720p', '1080p'], audio: true },
-    { id: 'sora-2-text-to-video', name: 'Sora 2', badge: null, durations: [4, 6, 8, 10, 12], resolutions: ['720p'], audio: true },
-    { id: 'sora-2-pro-text-to-video', name: 'Sora 2 Pro', badge: 'pro', durations: [4, 6, 8, 10, 12], resolutions: ['1080p'], audio: true },
-    { id: 'kling-2.6-pro-text-to-video', name: 'Kling 2.6 Pro', badge: 'pro', durations: [5, 10], resolutions: ['720p', '1080p'], audio: true },
-    { id: 'kling-2.5-turbo-pro-text-to-video', name: 'Kling 2.5 Turbo', badge: 'fast', durations: [5, 10], resolutions: ['720p', '1080p'], audio: false },
-    { id: 'ltx-2-fast-text-to-video', name: 'LTX 2 Fast', badge: 'fast', durations: [6, 10, 15, 20], resolutions: ['720p', '1080p', '2160p'], audio: true },
-    { id: 'ltx-2-full-text-to-video', name: 'LTX 2 Full', badge: 'full', durations: [6, 10], resolutions: ['720p', '1080p', '2160p'], audio: true },
-    { id: 'wan-2.5-preview-text-to-video', name: 'WAN 2.5', badge: null, durations: [5, 10], resolutions: ['480p'], audio: true },
-    { id: 'wan-2.2-a14b-text-to-video', name: 'WAN 2.2', badge: null, durations: [5], resolutions: ['480p'], audio: false },
-    { id: 'longcat-distilled-text-to-video', name: 'Longcat Distilled', badge: 'fast', durations: [5, 10, 15, 20, 25, 30], resolutions: ['720p'], audio: false },
-    { id: 'longcat-text-to-video', name: 'Longcat', badge: null, durations: [5, 10, 15, 20, 25, 30], resolutions: ['720p'], audio: false }
-  ],
-  'image-to-video': [
-    { id: 'veo3-fast-image-to-video', name: 'Veo3 Fast', badge: 'fast', durations: [8], resolutions: ['720p', '1080p'], audio: true },
-    { id: 'veo3-full-image-to-video', name: 'Veo3 Full', badge: 'full', durations: [8], resolutions: ['720p', '1080p'], audio: true },
-    { id: 'veo3.1-fast-image-to-video', name: 'Veo3.1 Fast', badge: 'fast', durations: [8], resolutions: ['720p', '1080p'], audio: true },
-    { id: 'veo3.1-full-image-to-video', name: 'Veo3.1 Full', badge: 'full', durations: [8], resolutions: ['720p', '1080p'], audio: true },
-    { id: 'sora-2-image-to-video', name: 'Sora 2', badge: null, durations: [4, 6, 8, 10, 12], resolutions: ['720p'], audio: true },
-    { id: 'sora-2-pro-image-to-video', name: 'Sora 2 Pro', badge: 'pro', durations: [4, 6, 8, 10, 12], resolutions: ['1080p'], audio: true },
-    { id: 'kling-2.6-pro-image-to-video', name: 'Kling 2.6 Pro', badge: 'pro', durations: [5, 10], resolutions: ['720p', '1080p'], audio: true },
-    { id: 'kling-2.5-turbo-pro-image-to-video', name: 'Kling 2.5 Turbo', badge: 'fast', durations: [5, 10], resolutions: ['720p', '1080p'], audio: false },
-    { id: 'ltx-2-fast-image-to-video', name: 'LTX 2 Fast', badge: 'fast', durations: [6, 10, 15, 20], resolutions: ['720p', '1080p', '2160p'], audio: true },
-    { id: 'ltx-2-full-image-to-video', name: 'LTX 2 Full', badge: 'full', durations: [6, 10], resolutions: ['720p', '1080p', '2160p'], audio: true },
-    { id: 'wan-2.5-preview-image-to-video', name: 'WAN 2.5', badge: null, durations: [5, 10], resolutions: ['480p'], audio: true },
-    { id: 'wan-2.1-pro-image-to-video', name: 'WAN 2.1 Pro', badge: 'pro', durations: [6], resolutions: ['720p'], audio: false },
-    { id: 'longcat-distilled-image-to-video', name: 'Longcat Distilled', badge: 'fast', durations: [5, 10, 15, 20, 25, 30], resolutions: ['720p'], audio: false },
-    { id: 'longcat-image-to-video', name: 'Longcat', badge: null, durations: [5, 10, 15, 20, 25, 30], resolutions: ['720p'], audio: false },
-    { id: 'ovi-image-to-video', name: 'OVI', badge: null, durations: [5], resolutions: ['720p'], audio: true }
-  ]
+// Model Data - will be populated from API
+let MODELS = {
+  'text-to-video': [],
+  'image-to-video': []
 };
 
 // App State
@@ -48,7 +17,9 @@ const appState = {
   videoUrl: null,
   selectedDuration: null,
   selectedResolution: null,
-  selectedAspectRatio: '16:9'
+  selectedAspectRatio: '16:9',
+  apiToken: null,
+  modelsLoaded: false
 };
 
 // Initialize App
@@ -56,10 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initializeApp();
 });
 
-function initializeApp() {
-  // Render initial models
-  renderModels();
-
+async function initializeApp() {
   // Setup prompt counter
   setupPromptCounter();
 
@@ -77,7 +45,83 @@ function initializeApp() {
     showErrorModal(e.reason?.message || 'An unexpected error occurred');
   });
 
+  // Try to load models if token is available
+  const tokenInput = document.getElementById('api-token');
+  if (tokenInput && tokenInput.value.trim()) {
+    await loadModels(tokenInput.value.trim());
+  }
+
+  // Render initial models
+  renderModels();
+
   console.log('Venice Video Generator initialized');
+}
+
+// Load models from API
+async function loadModels(token) {
+  try {
+    appState.apiToken = token;
+    const api = new VeniceAPI(token);
+    const models = await api.getModels();
+    
+    // Parse models and organize by type
+    MODELS['text-to-video'] = [];
+    MODELS['image-to-video'] = [];
+    
+    models.forEach(model => {
+      const constraints = model.model_spec?.constraints || {};
+      const modelType = constraints.model_type || 'text-to-video';
+      const name = model.model_spec?.name || model.id;
+      
+      // Extract badge from name or id
+      let badge = null;
+      if (name.toLowerCase().includes('fast') || model.id.includes('fast')) {
+        badge = 'fast';
+      } else if (name.toLowerCase().includes('full') || model.id.includes('full')) {
+        badge = 'full';
+      } else if (name.toLowerCase().includes('pro') || model.id.includes('pro')) {
+        badge = 'pro';
+      }
+      
+      // Parse durations (convert "5s" to 5)
+      const durations = (constraints.durations || []).map(d => parseInt(d.replace('s', '')));
+      
+      // Get resolutions
+      const resolutions = constraints.resolutions || [];
+      
+      // Get aspect ratios
+      const aspectRatios = constraints.aspect_ratios || [];
+      
+      // Audio support
+      const audio = constraints.audio || false;
+      
+      const modelData = {
+        id: model.id,
+        name: name,
+        badge: badge,
+        durations: durations,
+        resolutions: resolutions,
+        aspectRatios: aspectRatios,
+        audio: audio,
+        constraints: constraints,
+        offline: model.model_spec?.offline || false
+      };
+      
+      if (modelType === 'text-to-video') {
+        MODELS['text-to-video'].push(modelData);
+      } else if (modelType === 'image-to-video') {
+        MODELS['image-to-video'].push(modelData);
+      }
+    });
+    
+    appState.modelsLoaded = true;
+    renderModels();
+    console.log('Models loaded from API:', MODELS);
+  } catch (error) {
+    console.error('Error loading models:', error);
+    // Fall back to empty models - user will need to enter token
+    appState.modelsLoaded = false;
+  }
 }
 
 // Mode Switching
@@ -104,27 +148,49 @@ function switchMode(mode) {
 // Render Models
 function renderModels() {
   const grid = document.getElementById('model-grid');
-  const models = MODELS[appState.mode];
+  const models = MODELS[appState.mode] || [];
 
-  grid.innerHTML = models.map(model => `
-    <div class="model-card" data-model-id="${model.id}" onclick="selectModel('${model.id}')">
-      <div class="model-header">
-        <span class="model-name">${model.name}</span>
-        ${model.badge ? `<span class="model-badge ${model.badge}">${model.badge}</span>` : ''}
+  if (models.length === 0) {
+    grid.innerHTML = `
+      <div style="grid-column: 1 / -1; text-align: center; padding: var(--space-xl); color: var(--text-muted);">
+        <p style="margin-bottom: var(--space-md);">No models available. Please enter your API token to load models.</p>
+        <p style="font-size: 0.9rem;">Models will be automatically loaded when you enter a valid API token.</p>
       </div>
-      <div class="model-features">
-        <span class="feature-tag">
-          <svg viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-          ${model.durations.join(', ')}s
-        </span>
-        <span class="feature-tag">
-          <svg viewBox="0 0 24 24"><path d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-          ${model.resolutions.join(', ')}
-        </span>
-        ${model.audio ? '<span class="feature-tag audio"><svg viewBox="0 0 24 24"><path d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>Audio</span>' : ''}
+    `;
+    return;
+  }
+
+  grid.innerHTML = models.map(model => {
+    const durations = model.durations && model.durations.length > 0 
+      ? model.durations.join('s, ') + 's' 
+      : 'N/A';
+    const resolutions = model.resolutions && model.resolutions.length > 0 
+      ? model.resolutions.join(', ') 
+      : 'N/A';
+    
+    return `
+      <div class="model-card" data-model-id="${model.id}" onclick="selectModel('${model.id}')">
+        <div class="model-header">
+          <span class="model-name">${model.name}</span>
+          ${model.badge ? `<span class="model-badge ${model.badge}">${model.badge}</span>` : ''}
+          ${model.offline ? '<span class="model-badge" style="background: var(--error);">Offline</span>' : ''}
+        </div>
+        <div class="model-features">
+          <span class="feature-tag">
+            <svg viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            ${durations}
+          </span>
+          ${resolutions !== 'N/A' ? `
+          <span class="feature-tag">
+            <svg viewBox="0 0 24 24"><path d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+            ${resolutions}
+          </span>
+          ` : ''}
+          ${model.audio ? '<span class="feature-tag audio"><svg viewBox="0 0 24 24"><path d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>Audio</span>' : ''}
+        </div>
       </div>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 }
 
 // Select Model
@@ -141,11 +207,16 @@ function selectModel(modelId) {
     card.classList.toggle('selected', card.dataset.modelId === modelId);
   });
 
-  // Update duration pills
-  renderDurationPills(model.durations);
+  // Update duration pills (use constraints from API)
+  const durations = model.durations && model.durations.length > 0 ? model.durations : [];
+  renderDurationPills(durations);
 
-  // Update resolution pills
-  renderResolutionPills(model.resolutions);
+  // Update resolution pills (use constraints from API)
+  const resolutions = model.resolutions && model.resolutions.length > 0 ? model.resolutions : [];
+  renderResolutionPills(resolutions);
+
+  // Update aspect ratio pills based on model constraints
+  updateAspectRatioPills(model.aspectRatios || []);
 
   // Show/hide audio toggle
   document.getElementById('audio-toggle').classList.toggle('hidden', !model.audio);
@@ -154,9 +225,39 @@ function selectModel(modelId) {
   updateSelectedModelInfo(model);
 }
 
+// Update aspect ratio pills based on model constraints
+function updateAspectRatioPills(availableRatios) {
+  const allRatios = ['16:9', '9:16', '1:1'];
+  const ratioPills = document.querySelectorAll('[data-ratio]');
+  
+  ratioPills.forEach(pill => {
+    const ratio = pill.dataset.ratio;
+    // If model has specific aspect ratios, only show those
+    // If empty array, show all (model doesn't restrict)
+    if (availableRatios.length > 0 && !availableRatios.includes(ratio)) {
+      pill.style.display = 'none';
+    } else {
+      pill.style.display = 'inline-block';
+    }
+  });
+  
+  // If model requires specific aspect ratios and current selection isn't valid, change it
+  if (availableRatios.length > 0 && !availableRatios.includes(appState.selectedAspectRatio)) {
+    appState.selectedAspectRatio = availableRatios[0];
+    ratioPills.forEach(p => {
+      p.classList.toggle('selected', p.dataset.ratio === appState.selectedAspectRatio);
+    });
+  }
+}
+
 // Render Duration Pills
 function renderDurationPills(durations) {
   const container = document.getElementById('duration-pills');
+  if (!durations || durations.length === 0) {
+    container.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem;">No duration options available</p>';
+    appState.selectedDuration = null;
+    return;
+  }
   container.innerHTML = durations.map((d, i) => `
     <button type="button" class="param-pill ${i === 0 ? 'selected' : ''}" data-duration="${d}" onclick="selectDuration(${d})">${d}s</button>
   `).join('');
@@ -166,6 +267,11 @@ function renderDurationPills(durations) {
 // Render Resolution Pills
 function renderResolutionPills(resolutions) {
   const container = document.getElementById('resolution-pills');
+  if (!resolutions || resolutions.length === 0) {
+    container.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem;">No resolution options available</p>';
+    appState.selectedResolution = null;
+    return;
+  }
   container.innerHTML = resolutions.map((r, i) => `
     <button type="button" class="param-pill ${i === 0 ? 'selected' : ''}" data-resolution="${r}" onclick="selectResolution('${r}')">${r}</button>
   `).join('');
@@ -227,6 +333,24 @@ function setupPromptCounter() {
       counter.textContent = `${len} / 5000`;
       counter.classList.toggle('near-limit', len > 4500 && len <= 5000);
       counter.classList.toggle('over-limit', len > 5000);
+    });
+  }
+
+  // Setup API token input to load models when token is entered
+  const tokenInput = document.getElementById('api-token');
+  if (tokenInput) {
+    let loadTimeout;
+    tokenInput.addEventListener('input', () => {
+      const token = tokenInput.value.trim();
+      if (token && token.length > 10) {
+        // Debounce - wait 1 second after user stops typing
+        clearTimeout(loadTimeout);
+        loadTimeout = setTimeout(async () => {
+          if (!appState.modelsLoaded || appState.apiToken !== token) {
+            await loadModels(token);
+          }
+        }, 1000);
+      }
     });
   }
 }
@@ -534,8 +658,22 @@ async function handleEstimate() {
     // Build parameters - start with required fields
     const params = {
       model: appState.selectedModel.id,
-      aspect_ratio: appState.selectedAspectRatio || '16:9' // Required by API
+      modelConstraints: appState.selectedModel.constraints // Pass constraints for validation
     };
+
+    // Add aspect ratio only if model supports/requires it
+    const modelAspectRatios = appState.selectedModel.aspectRatios || [];
+    if (modelAspectRatios.length > 0) {
+      // Model requires specific aspect ratios
+      if (modelAspectRatios.includes(appState.selectedAspectRatio)) {
+        params.aspect_ratio = appState.selectedAspectRatio;
+      } else {
+        params.aspect_ratio = modelAspectRatios[0]; // Use first available
+      }
+    } else if (appState.selectedAspectRatio) {
+      // Model doesn't restrict, but we can still send it
+      params.aspect_ratio = appState.selectedAspectRatio;
+    }
 
     // Add duration if valid (will be converted to "5s" format in API)
     if (appState.selectedDuration) {

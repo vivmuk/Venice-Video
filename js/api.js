@@ -7,6 +7,7 @@ class VeniceAPI {
     }
     this.token = token;
     this.baseUrl = 'https://api.venice.ai/api/v1/video';
+    this.modelsBaseUrl = 'https://api.venice.ai/api/v1';
   }
 
   // Helper method for API requests
@@ -144,6 +145,7 @@ class VeniceAPI {
     if (params.image_url) body.image_url = params.image_url;
     
     // Duration must be a string like "5s" or "10s", not a number
+    // Only include if provided and valid
     if (params.duration !== undefined && params.duration !== null) {
       // If it's already a string with 's', use it; otherwise convert number to string
       if (typeof params.duration === 'string' && params.duration.endsWith('s')) {
@@ -156,16 +158,19 @@ class VeniceAPI {
       }
     }
     
-    // Aspect ratio is REQUIRED - must be "16:9", "9:16", or "1:1"
-    // Default to "16:9" if not provided
-    const validAspectRatios = ['16:9', '9:16', '1:1'];
-    if (params.aspect_ratio && validAspectRatios.includes(params.aspect_ratio)) {
-      body.aspect_ratio = params.aspect_ratio;
-    } else {
-      body.aspect_ratio = '16:9'; // Default required value
+    // Aspect ratio - only include if model constraints require it
+    // Some models require it, others don't support it
+    if (params.aspect_ratio) {
+      const validAspectRatios = ['16:9', '9:16', '1:1'];
+      if (validAspectRatios.includes(params.aspect_ratio)) {
+        body.aspect_ratio = params.aspect_ratio;
+      }
+    } else if (params.modelConstraints && params.modelConstraints.aspect_ratios && params.modelConstraints.aspect_ratios.length > 0) {
+      // If model requires aspect_ratio but none provided, use first available
+      body.aspect_ratio = params.modelConstraints.aspect_ratios[0];
     }
     
-    // Resolution is optional
+    // Resolution - only include if model supports it and it's provided
     if (params.resolution && typeof params.resolution === 'string' && params.resolution.trim()) {
       body.resolution = params.resolution.trim();
     }
@@ -243,6 +248,7 @@ class VeniceAPI {
     if (params.image_url) body.image_url = params.image_url;
     
     // Duration must be a string like "5s" or "10s", not a number
+    // Only include if provided and valid
     if (params.duration !== undefined && params.duration !== null) {
       // If it's already a string with 's', use it; otherwise convert number to string
       if (typeof params.duration === 'string' && params.duration.endsWith('s')) {
@@ -255,16 +261,19 @@ class VeniceAPI {
       }
     }
     
-    // Aspect ratio is REQUIRED - must be "16:9", "9:16", or "1:1"
-    // Default to "16:9" if not provided
-    const validAspectRatios = ['16:9', '9:16', '1:1'];
-    if (params.aspect_ratio && validAspectRatios.includes(params.aspect_ratio)) {
-      body.aspect_ratio = params.aspect_ratio;
-    } else {
-      body.aspect_ratio = '16:9'; // Default required value
+    // Aspect ratio - only include if model constraints require it
+    // Some models require it, others don't support it
+    if (params.aspect_ratio) {
+      const validAspectRatios = ['16:9', '9:16', '1:1'];
+      if (validAspectRatios.includes(params.aspect_ratio)) {
+        body.aspect_ratio = params.aspect_ratio;
+      }
+    } else if (params.modelConstraints && params.modelConstraints.aspect_ratios && params.modelConstraints.aspect_ratios.length > 0) {
+      // If model requires aspect_ratio but none provided, use first available
+      body.aspect_ratio = params.modelConstraints.aspect_ratios[0];
     }
     
-    // Resolution is optional
+    // Resolution - only include if model supports it and it's provided
     if (params.resolution && typeof params.resolution === 'string' && params.resolution.trim()) {
       body.resolution = params.resolution.trim();
     }
@@ -298,6 +307,28 @@ class VeniceAPI {
       success: data.success !== false,
       message: data.message || 'Storage cleanup completed'
     };
+  }
+
+  // Fetch available video models from API
+  async getModels() {
+    try {
+      const response = await fetch(`${this.modelsBaseUrl}/models?type=video`, {
+        headers: {
+          'Authorization': `Bearer ${this.token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch models: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data.data || [];
+    } catch (error) {
+      console.error('Error fetching models:', error);
+      throw error;
+    }
   }
 }
 
