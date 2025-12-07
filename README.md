@@ -185,10 +185,34 @@ A clean, Swiss-designed interface for generating videos using the Venice AI API.
 6. Enable auto-delete to simplify cleanup
 7. Always validate parameters before submission
 
+## Deployment
+
+### Railway Deployment
+
+1. **Install Dependencies**:
+   ```bash
+   npm install
+   ```
+
+2. **Deploy to Railway**:
+   - Connect your GitHub repository to Railway
+   - Railway will automatically detect the `package.json` and `server.js`
+   - The server will start automatically with the correct CSP headers
+
+3. **Environment Variables** (if needed):
+   - Railway will use the PORT environment variable automatically
+   - No additional configuration needed
+
+The server includes proper Content Security Policy headers to allow:
+- Blob URLs for video playback
+- API connections to Venice AI and imgbb.com
+- Google Fonts for styling
+
 ## Technical Overview
 
 This application is built with:
 
+- **Node.js/Express** for serving static files with proper headers
 - **HTML5** for structure
 - **Milligram CSS Framework** for base styling
 - **Custom CSS** for Swiss design principles
@@ -196,10 +220,14 @@ This application is built with:
 
 All code is organized in the following files:
 
+- `server.js`: Express server with CSP headers
+- `package.json`: Node.js dependencies and scripts
 - `index.html`: Main HTML structure
 - `css/milligram.min.css`: Base CSS framework
 - `css/styles.css`: Custom styling
-- `js/state.js`: Global state management
 - `js/api.js`: Venice API integration class
+- `js/app.js`: Main application logic
 - `js/components.js`: UI component functions
-- `js/main.js`: Application initialization and event handling
+- `js/utils.js`: Utility functions
+- `js/main.js`: Application initialization
+- `js/state.js`: Global state management
