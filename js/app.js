@@ -522,8 +522,13 @@ function validateForm() {
     }
   } else {
     const imageUrl = document.getElementById('image-url').value.trim();
-    if (!appState.uploadedImage && !imageUrl) {
+    if (!appState.uploadedImageUrl && !imageUrl) {
       errors['image-url'] = 'Please upload an image or provide a URL';
+    }
+    // Also check for motion prompt (required for image-to-video)
+    const motionPrompt = document.getElementById('motion-prompt').value.trim();
+    if (!motionPrompt) {
+      errors['motion-prompt'] = 'Motion prompt is required for image-to-video';
     }
   }
 
@@ -570,8 +575,20 @@ async function handleGenerate() {
     // Build parameters - start with required fields
     const params = {
       model: appState.selectedModel.id,
-      aspect_ratio: appState.selectedAspectRatio || '16:9' // Required by API
+      modelConstraints: appState.selectedModel.constraints // Pass constraints for validation
     };
+
+    // Add aspect ratio only if model supports it
+    const modelAspectRatios = appState.selectedModel.aspectRatios || [];
+    if (modelAspectRatios.length > 0) {
+      // Model supports aspect ratios - use selected one or first available
+      if (modelAspectRatios.includes(appState.selectedAspectRatio)) {
+        params.aspect_ratio = appState.selectedAspectRatio;
+      } else {
+        params.aspect_ratio = modelAspectRatios[0];
+      }
+    }
+    // If model doesn't support aspect_ratio (empty array), don't include it
 
     // Add duration if valid (will be converted to "5s" format in API)
     if (appState.selectedDuration) {
@@ -606,10 +623,16 @@ async function handleGenerate() {
         return;
       }
 
+      // Prompt is REQUIRED for image-to-video models too
       const motionPrompt = document.getElementById('motion-prompt').value.trim();
-      if (motionPrompt) {
-        params.prompt = motionPrompt;
+      if (!motionPrompt) {
+        showToast('Please enter a motion prompt (describes how the image should move)', 'error');
+        generateBtn.disabled = false;
+        generateBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> Generate Video';
+        hideLoading();
+        return;
       }
+      params.prompt = motionPrompt;
     }
 
     // Add resolution if selected (optional parameter)
@@ -708,10 +731,23 @@ async function pollForCompletion(api, queueId, modelId = null) {
           appState.videoUrl = blobUrl; // Update stored URL
         }
 
-        // Handle video load errors
+        // Handle video load errors - but don't show error modal for CSP issues
+        // The video can still be downloaded even if it can't be displayed
         videoPlayer.onerror = (e) => {
           console.error('Video load error:', e);
-          showErrorModal('Failed to load video. You can still download it using the Download button.');
+          // Check if it's a CSP error
+          const errorMsg = e.message || '';
+          if (errorMsg.includes('Content Security Policy') || errorMsg.includes('CSP')) {
+            console.warn('CSP blocking video playback, but video is available for download');
+            // Don't show error modal for CSP issues - video can still be downloaded
+          } else {
+            showErrorModal('Failed to load video. You can still download it using the Download button.');
+          }
+        };
+        
+        // Also listen for loadeddata event to confirm video loaded successfully
+        videoPlayer.onloadeddata = () => {
+          console.log('Video loaded successfully');
         };
 
         showToast('Video generated successfully!', 'success');
@@ -766,19 +802,17 @@ async function handleEstimate() {
       modelConstraints: appState.selectedModel.constraints // Pass constraints for validation
     };
 
-    // Add aspect ratio only if model supports/requires it
+    // Add aspect ratio ONLY if model supports it (has aspect_ratios in constraints)
     const modelAspectRatios = appState.selectedModel.aspectRatios || [];
     if (modelAspectRatios.length > 0) {
-      // Model requires specific aspect ratios
+      // Model supports aspect ratios - use selected one or first available
       if (modelAspectRatios.includes(appState.selectedAspectRatio)) {
         params.aspect_ratio = appState.selectedAspectRatio;
       } else {
-        params.aspect_ratio = modelAspectRatios[0]; // Use first available
+        params.aspect_ratio = modelAspectRatios[0];
       }
-    } else if (appState.selectedAspectRatio) {
-      // Model doesn't restrict, but we can still send it
-      params.aspect_ratio = appState.selectedAspectRatio;
     }
+    // If model doesn't support aspect_ratio (empty array), don't include it at all
 
     // Add duration if valid (will be converted to "5s" format in API)
     if (appState.selectedDuration) {

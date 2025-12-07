@@ -162,17 +162,18 @@ class VeniceAPI {
       }
     }
     
-    // Aspect ratio - only include if model constraints require it
-    // Some models require it, others don't support it
-    if (params.aspect_ratio) {
-      const validAspectRatios = ['16:9', '9:16', '1:1'];
-      if (validAspectRatios.includes(params.aspect_ratio)) {
+    // Aspect ratio - ONLY include if model supports it (has aspect_ratios in constraints)
+    // If aspect_ratios array is empty, the model does NOT support aspect_ratio
+    if (params.modelConstraints && params.modelConstraints.aspect_ratios && params.modelConstraints.aspect_ratios.length > 0) {
+      // Model supports aspect ratios
+      if (params.aspect_ratio && params.modelConstraints.aspect_ratios.includes(params.aspect_ratio)) {
         body.aspect_ratio = params.aspect_ratio;
+      } else {
+        // Use first available aspect ratio from model constraints
+        body.aspect_ratio = params.modelConstraints.aspect_ratios[0];
       }
-    } else if (params.modelConstraints && params.modelConstraints.aspect_ratios && params.modelConstraints.aspect_ratios.length > 0) {
-      // If model requires aspect_ratio but none provided, use first available
-      body.aspect_ratio = params.modelConstraints.aspect_ratios[0];
     }
+    // If model doesn't support aspect_ratio (empty array or undefined), don't include it at all
     
     // Resolution - only include if model supports it and it's provided
     if (params.resolution && typeof params.resolution === 'string' && params.resolution.trim()) {
@@ -277,6 +278,10 @@ class VeniceAPI {
       if (!params.image_url) {
         throw new Error('Image URL is required for image-to-video models');
       }
+      // Prompt is also required for image-to-video models
+      if (!params.prompt) {
+        throw new Error('Prompt is required for image-to-video models (describes how the image should move)');
+      }
     } else {
       if (!params.prompt) {
         throw new Error('Prompt is required for text-to-video models');
@@ -304,17 +309,18 @@ class VeniceAPI {
       }
     }
     
-    // Aspect ratio - only include if model constraints require it
-    // Some models require it, others don't support it
-    if (params.aspect_ratio) {
-      const validAspectRatios = ['16:9', '9:16', '1:1'];
-      if (validAspectRatios.includes(params.aspect_ratio)) {
+    // Aspect ratio - ONLY include if model supports it (has aspect_ratios in constraints)
+    // If aspect_ratios array is empty, the model does NOT support aspect_ratio
+    if (params.modelConstraints && params.modelConstraints.aspect_ratios && params.modelConstraints.aspect_ratios.length > 0) {
+      // Model supports aspect ratios
+      if (params.aspect_ratio && params.modelConstraints.aspect_ratios.includes(params.aspect_ratio)) {
         body.aspect_ratio = params.aspect_ratio;
+      } else {
+        // Use first available aspect ratio from model constraints
+        body.aspect_ratio = params.modelConstraints.aspect_ratios[0];
       }
-    } else if (params.modelConstraints && params.modelConstraints.aspect_ratios && params.modelConstraints.aspect_ratios.length > 0) {
-      // If model requires aspect_ratio but none provided, use first available
-      body.aspect_ratio = params.modelConstraints.aspect_ratios[0];
     }
+    // If model doesn't support aspect_ratio (empty array or undefined), don't include it at all
     
     // Resolution - only include if model supports it and it's provided
     if (params.resolution && typeof params.resolution === 'string' && params.resolution.trim()) {
