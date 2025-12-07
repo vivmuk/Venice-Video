@@ -135,21 +135,37 @@ class VeniceAPI {
       }
     }
 
-    // Build request body - only include defined parameters
+    // Build request body
     const body = {
       model: params.model
     };
 
     if (params.prompt) body.prompt = params.prompt;
     if (params.image_url) body.image_url = params.image_url;
-    if (params.duration !== undefined && params.duration !== null && !isNaN(params.duration)) {
-      body.duration = parseInt(params.duration);
+    
+    // Duration must be a string like "5s" or "10s", not a number
+    if (params.duration !== undefined && params.duration !== null) {
+      // If it's already a string with 's', use it; otherwise convert number to string
+      if (typeof params.duration === 'string' && params.duration.endsWith('s')) {
+        body.duration = params.duration;
+      } else {
+        const durationNum = parseInt(params.duration);
+        if (!isNaN(durationNum)) {
+          body.duration = `${durationNum}s`;
+        }
+      }
     }
-    // Only include aspect_ratio if it's a valid non-empty string
-    if (params.aspect_ratio && typeof params.aspect_ratio === 'string' && params.aspect_ratio.trim()) {
-      body.aspect_ratio = params.aspect_ratio.trim();
+    
+    // Aspect ratio is REQUIRED - must be "16:9", "9:16", or "1:1"
+    // Default to "16:9" if not provided
+    const validAspectRatios = ['16:9', '9:16', '1:1'];
+    if (params.aspect_ratio && validAspectRatios.includes(params.aspect_ratio)) {
+      body.aspect_ratio = params.aspect_ratio;
+    } else {
+      body.aspect_ratio = '16:9'; // Default required value
     }
-    // Only include resolution if it's a valid non-empty string
+    
+    // Resolution is optional
     if (params.resolution && typeof params.resolution === 'string' && params.resolution.trim()) {
       body.resolution = params.resolution.trim();
     }
@@ -225,14 +241,30 @@ class VeniceAPI {
 
     if (params.prompt) body.prompt = params.prompt;
     if (params.image_url) body.image_url = params.image_url;
-    if (params.duration !== undefined && params.duration !== null && !isNaN(params.duration)) {
-      body.duration = parseInt(params.duration);
+    
+    // Duration must be a string like "5s" or "10s", not a number
+    if (params.duration !== undefined && params.duration !== null) {
+      // If it's already a string with 's', use it; otherwise convert number to string
+      if (typeof params.duration === 'string' && params.duration.endsWith('s')) {
+        body.duration = params.duration;
+      } else {
+        const durationNum = parseInt(params.duration);
+        if (!isNaN(durationNum)) {
+          body.duration = `${durationNum}s`;
+        }
+      }
     }
-    // Only include aspect_ratio if it's a valid non-empty string
-    if (params.aspect_ratio && typeof params.aspect_ratio === 'string' && params.aspect_ratio.trim()) {
-      body.aspect_ratio = params.aspect_ratio.trim();
+    
+    // Aspect ratio is REQUIRED - must be "16:9", "9:16", or "1:1"
+    // Default to "16:9" if not provided
+    const validAspectRatios = ['16:9', '9:16', '1:1'];
+    if (params.aspect_ratio && validAspectRatios.includes(params.aspect_ratio)) {
+      body.aspect_ratio = params.aspect_ratio;
+    } else {
+      body.aspect_ratio = '16:9'; // Default required value
     }
-    // Only include resolution if it's a valid non-empty string
+    
+    // Resolution is optional
     if (params.resolution && typeof params.resolution === 'string' && params.resolution.trim()) {
       body.resolution = params.resolution.trim();
     }

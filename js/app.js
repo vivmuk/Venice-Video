@@ -380,12 +380,13 @@ async function handleGenerate() {
     generateBtn.innerHTML = '<span class="spinner"></span> Submitting...';
     showLoading('Submitting video generation request...');
 
-    // Build parameters - start with required fields only
+    // Build parameters - start with required fields
     const params = {
-      model: appState.selectedModel.id
+      model: appState.selectedModel.id,
+      aspect_ratio: appState.selectedAspectRatio || '16:9' // Required by API
     };
 
-    // Add duration if valid
+    // Add duration if valid (will be converted to "5s" format in API)
     if (appState.selectedDuration) {
       params.duration = appState.selectedDuration;
     }
@@ -419,6 +420,11 @@ async function handleGenerate() {
       if (motionPrompt) {
         params.prompt = motionPrompt;
       }
+    }
+
+    // Add resolution if selected (optional parameter)
+    if (appState.selectedResolution) {
+      params.resolution = appState.selectedResolution;
     }
 
     // Create API instance and queue
@@ -525,12 +531,13 @@ async function handleEstimate() {
     estimateBtn.disabled = true;
     estimateBtn.innerHTML = '<span class="spinner"></span> Calculating...';
 
-    // Build parameters - start with required fields only
+    // Build parameters - start with required fields
     const params = {
-      model: appState.selectedModel.id
+      model: appState.selectedModel.id,
+      aspect_ratio: appState.selectedAspectRatio || '16:9' // Required by API
     };
 
-    // Add duration if valid
+    // Add duration if valid (will be converted to "5s" format in API)
     if (appState.selectedDuration) {
       params.duration = appState.selectedDuration;
     }
@@ -556,14 +563,10 @@ async function handleEstimate() {
       }
     }
 
-    // Temporarily removing aspect_ratio and resolution to debug 400 errors
-    // These will be re-added once we confirm the basic request works
-    // if (appState.selectedAspectRatio && appState.selectedAspectRatio !== '16:9') {
-    //   params.aspect_ratio = appState.selectedAspectRatio;
-    // }
-    // if (appState.selectedResolution) {
-    //   params.resolution = appState.selectedResolution;
-    // }
+    // Add resolution if selected (optional parameter)
+    if (appState.selectedResolution) {
+      params.resolution = appState.selectedResolution;
+    }
 
     const api = new VeniceAPI(token);
     const quote = await api.quote(params);
