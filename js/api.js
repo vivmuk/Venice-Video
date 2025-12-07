@@ -59,7 +59,15 @@ class VeniceAPI {
 
   // Handle API errors
   async handleError(response) {
-    const errorData = await response.json().catch(() => ({}));
+    let errorData = {};
+    try {
+      const text = await response.text();
+      if (text) {
+        errorData = JSON.parse(text);
+      }
+    } catch (e) {
+      // If parsing fails, errorData remains empty object
+    }
 
     console.error(`API Error ${response.status}:`, {
       status: response.status,
@@ -68,13 +76,19 @@ class VeniceAPI {
       errorData
     });
 
+    // Build detailed error message
+    let errorMessage = errorData.message || errorData.error || 'Invalid request parameters';
+    if (errorData.details) {
+      errorMessage += `: ${JSON.stringify(errorData.details)}`;
+    }
+
     const errorMessages = {
-      400: `Bad Request: ${errorData.message || 'Invalid request parameters'}`,
+      400: `Bad Request: ${errorMessage}`,
       401: 'Unauthorized: Invalid API token. Please check your API key.',
       402: 'Payment Required: Insufficient credits in your account.',
       404: 'Not Found: The requested resource was not found.',
       413: 'Payload Too Large: Your prompt exceeds the maximum length.',
-      422: `Validation Error: ${errorData.message || 'Invalid model or parameters'}`,
+      422: `Validation Error: ${errorMessage}`,
       429: 'Rate Limited: Too many requests. Please wait a moment.',
       500: 'Server Error: Venice API is experiencing issues. Try again later.'
     };
@@ -110,16 +124,27 @@ class VeniceAPI {
       }
     }
 
-    // Build request body
+    // Build request body - only include defined parameters
     const body = {
       model: params.model
     };
 
     if (params.prompt) body.prompt = params.prompt;
     if (params.image_url) body.image_url = params.image_url;
-    if (params.duration) body.duration = parseInt(params.duration);
-    if (params.aspect_ratio) body.aspect_ratio = params.aspect_ratio;
-    if (params.resolution) body.resolution = params.resolution;
+    if (params.duration !== undefined && params.duration !== null && !isNaN(params.duration)) {
+      body.duration = parseInt(params.duration);
+    }
+    // Only include aspect_ratio if it's a valid non-empty string
+    if (params.aspect_ratio && typeof params.aspect_ratio === 'string' && params.aspect_ratio.trim()) {
+      body.aspect_ratio = params.aspect_ratio.trim();
+    }
+    // Only include resolution if it's a valid non-empty string
+    if (params.resolution && typeof params.resolution === 'string' && params.resolution.trim()) {
+      body.resolution = params.resolution.trim();
+    }
+
+    // Log request body for debugging
+    console.log('Queue request body:', JSON.stringify(body, null, 2));
 
     const data = await this.request('/queue', {
       method: 'POST',
@@ -169,13 +194,40 @@ class VeniceAPI {
       throw new Error('Model is required for quote');
     }
 
+    // For text-to-video, prompt is required
+    // For image-to-video, image_url is required
+    const isImageToVideo = params.model.includes('image-to-video');
+
+    if (isImageToVideo) {
+      if (!params.image_url) {
+        throw new Error('Image URL is required for image-to-video models');
+      }
+    } else {
+      if (!params.prompt) {
+        throw new Error('Prompt is required for text-to-video models');
+      }
+    }
+
     const body = {
       model: params.model
     };
 
     if (params.prompt) body.prompt = params.prompt;
     if (params.image_url) body.image_url = params.image_url;
-    if (params.duration) body.duration = parseInt(params.duration);
+    if (params.duration !== undefined && params.duration !== null && !isNaN(params.duration)) {
+      body.duration = parseInt(params.duration);
+    }
+    // Only include aspect_ratio if it's a valid non-empty string
+    if (params.aspect_ratio && typeof params.aspect_ratio === 'string' && params.aspect_ratio.trim()) {
+      body.aspect_ratio = params.aspect_ratio.trim();
+    }
+    // Only include resolution if it's a valid non-empty string
+    if (params.resolution && typeof params.resolution === 'string' && params.resolution.trim()) {
+      body.resolution = params.resolution.trim();
+    }
+
+    // Log request body for debugging
+    console.log('Quote request body:', JSON.stringify(body, null, 2));
 
     const data = await this.request('/quote', {
       method: 'POST',

@@ -516,11 +516,23 @@ async function handleEstimate() {
 
     const params = {
       model: appState.selectedModel.id,
-      duration: appState.selectedDuration
+      duration: appState.selectedDuration,
+      aspect_ratio: appState.selectedAspectRatio,
+      resolution: appState.selectedResolution
     };
 
     if (appState.mode === 'text-to-video') {
       params.prompt = document.getElementById('prompt').value.trim();
+    } else {
+      // For image-to-video
+      const imageUrl = document.getElementById('image-url').value.trim();
+      if (imageUrl) {
+        params.image_url = imageUrl;
+      }
+      const motionPrompt = document.getElementById('motion-prompt').value.trim();
+      if (motionPrompt) {
+        params.prompt = motionPrompt;
+      }
     }
 
     const api = new VeniceAPI(token);
