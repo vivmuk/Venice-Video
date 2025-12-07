@@ -572,13 +572,13 @@ async function handleGenerate() {
     document.getElementById('progress-section').classList.remove('hidden');
     document.getElementById('queue-id').textContent = response.queue_id.substring(0, 8) + '...';
 
-    console.log('Starting polling with queue_id:', response.queue_id);
+    console.log('Starting polling with queue_id:', response.queue_id, 'model:', response.model);
 
     // Wait a few seconds before first poll to give the queue time to process
     await new Promise(resolve => setTimeout(resolve, 3000));
 
-    // Start polling
-    pollForCompletion(api, response.queue_id);
+    // Start polling - pass model ID as well since API requires it
+    pollForCompletion(api, response.queue_id, response.model || appState.selectedModel?.id);
 
   } catch (error) {
     console.error('Generation error:', error);
@@ -590,7 +590,7 @@ async function handleGenerate() {
 }
 
 // Poll for Completion
-async function pollForCompletion(api, queueId) {
+async function pollForCompletion(api, queueId, modelId = null) {
   const pollInterval = 10000; // 10 seconds
   const maxAttempts = 120; // 20 minutes max
 
@@ -604,8 +604,8 @@ async function pollForCompletion(api, queueId) {
     }
 
     try {
-      console.log(`Polling attempt ${attempt + 1} for queue_id: ${queueId}`);
-      const status = await api.retrieve(queueId);
+      console.log(`Polling attempt ${attempt + 1} for queue_id: ${queueId}, model: ${modelId}`);
+      const status = await api.retrieve(queueId, modelId);
 
       // Update progress UI
       document.getElementById('progress-fill').style.width = `${status.progress}%`;

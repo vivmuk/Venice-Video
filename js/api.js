@@ -198,7 +198,7 @@ class VeniceAPI {
   }
 
   // Retrieve video generation status
-  async retrieve(queueId, deleteOnCompletion = false) {
+  async retrieve(queueId, model = null, deleteOnCompletion = false) {
     if (!queueId) {
       throw new Error('Queue ID is required');
     }
@@ -207,6 +207,11 @@ class VeniceAPI {
       queue_id: queueId,
       delete_media_on_completion: deleteOnCompletion
     };
+
+    // Add model if provided (API may require it)
+    if (model) {
+      requestBody.model = model;
+    }
 
     console.log('Retrieve request body:', JSON.stringify(requestBody, null, 2));
 
