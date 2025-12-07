@@ -183,9 +183,16 @@ class VeniceAPI {
       body: JSON.stringify(body)
     });
 
+    console.log('Queue response:', JSON.stringify(data, null, 2));
+
+    if (!data.queue_id) {
+      console.error('Queue response missing queue_id:', data);
+      throw new Error('Invalid queue response: queue_id not found in response');
+    }
+
     return {
       queue_id: data.queue_id,
-      model: data.model,
+      model: data.model || body.model,
       message: data.message
     };
   }
@@ -196,13 +203,30 @@ class VeniceAPI {
       throw new Error('Queue ID is required');
     }
 
+    const requestBody = {
+      queue_id: queueId,
+      delete_media_on_completion: deleteOnCompletion
+    };
+
+    console.log('Retrieve request body:', JSON.stringify(requestBody, null, 2));
+
     const data = await this.request('/retrieve', {
       method: 'POST',
-      body: JSON.stringify({
-        queue_id: queueId,
-        delete_media_on_completion: deleteOnCompletion
-      })
+      body: JSON.stringify(requestBody)
     });
+
+    console.log('Retrieve response:', JSON.stringify(data, null, 2));
+
+    // Handle video blob response (already handled in request method)
+    if (data.status === 'completed' && data.video_url) {
+      return {
+        status: 'completed',
+        progress: 100,
+        video_url: data.video_url,
+        video_blob: data.video_blob,
+        estimated_time_remaining: 0
+      };
+    }
 
     // Calculate progress if we have timing info
     let progress = 0;

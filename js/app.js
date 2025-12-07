@@ -555,6 +555,10 @@ async function handleGenerate() {
     const api = new VeniceAPI(token);
     const response = await api.queue(params);
 
+    if (!response.queue_id) {
+      throw new Error('Failed to get queue_id from API response');
+    }
+
     appState.queueId = response.queue_id;
     appState.isProcessing = true;
 
@@ -567,6 +571,11 @@ async function handleGenerate() {
     // Show progress section
     document.getElementById('progress-section').classList.remove('hidden');
     document.getElementById('queue-id').textContent = response.queue_id.substring(0, 8) + '...';
+
+    console.log('Starting polling with queue_id:', response.queue_id);
+
+    // Wait a few seconds before first poll to give the queue time to process
+    await new Promise(resolve => setTimeout(resolve, 3000));
 
     // Start polling
     pollForCompletion(api, response.queue_id);
@@ -585,6 +594,9 @@ async function pollForCompletion(api, queueId) {
   const pollInterval = 10000; // 10 seconds
   const maxAttempts = 120; // 20 minutes max
 
+  // Wait a few seconds before first poll to give the queue time to process
+  await new Promise(resolve => setTimeout(resolve, 3000));
+
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (!appState.isProcessing) {
       console.log('Polling cancelled');
@@ -592,6 +604,7 @@ async function pollForCompletion(api, queueId) {
     }
 
     try {
+      console.log(`Polling attempt ${attempt + 1} for queue_id: ${queueId}`);
       const status = await api.retrieve(queueId);
 
       // Update progress UI
@@ -631,6 +644,15 @@ async function pollForCompletion(api, queueId) {
 
     } catch (error) {
       console.error('Polling error:', error);
+      
+      // If it's a 404 error and we're in early attempts, retry after a longer delay
+      if (error.message.includes('Not Found') && attempt < 5) {
+        console.log('Queue ID not found yet, retrying after longer delay...');
+        await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
+        continue; // Retry
+      }
+      
+      // For other errors or after retries, show error
       appState.isProcessing = false;
       document.getElementById('status-badge').className = 'status-badge status-error';
       document.getElementById('status-badge').textContent = 'Error';
