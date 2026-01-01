@@ -385,7 +385,8 @@ class VeniceAPI {
         headers['Authorization'] = `Bearer ${this.customToken}`;
       }
 
-      const response = await fetch(`${this.modelsBaseUrl}/models`, {
+      // Fetch video models with type=video filter
+      const response = await fetch(`${this.modelsBaseUrl}/models?type=video`, {
         headers
       });
 
@@ -394,7 +395,10 @@ class VeniceAPI {
       }
 
       const data = await response.json();
-      return data.data || [];
+      const models = data.data || [];
+      
+      console.log(`API returned ${models.length} video models`);
+      return models;
     } catch (error) {
       console.error('Error fetching models:', error);
       throw error;

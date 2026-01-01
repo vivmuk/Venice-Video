@@ -41,6 +41,7 @@ app.get('/api/models', async (req, res) => {
   }
 
   try {
+    // Fetch video models with type=video filter
     const response = await fetch('https://api.venice.ai/api/v1/models?type=video', {
       headers: {
         'Authorization': `Bearer ${VENICE_API_TOKEN}`,
@@ -53,6 +54,7 @@ app.get('/api/models', async (req, res) => {
     }
 
     const data = await response.json();
+    console.log(`Fetched ${(data.data || []).length} video models from Venice API`);
     res.json(data);
   } catch (error) {
     console.error('Error fetching models:', error);

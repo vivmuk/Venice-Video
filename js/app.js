@@ -1,6 +1,6 @@
 // Venice Video Generator - Main Application
 
-// Model Data - will be populated from API
+// Model Data - loaded from Venice API
 let MODELS = {
   'text-to-video': [],
   'image-to-video': []
@@ -71,45 +71,43 @@ async function loadModels(token) {
     MODELS['text-to-video'] = [];
     MODELS['image-to-video'] = [];
     
+    console.log('API returned', models.length, 'models');
+    
     models.forEach(model => {
       const constraints = model.model_spec?.constraints || {};
       const name = model.model_spec?.name || model.id;
       const modelId = model.id || '';
       
-      // Determine model type - check both constraints.model_type and model ID/name
-      let modelType = constraints.model_type;
+      // Get model_type from constraints - this is the reliable source
+      const modelType = constraints.model_type;
       
-      // If model_type is not set, check the model ID or name for patterns
+      // Skip if no model_type (not a proper video model)
       if (!modelType) {
-        const idLower = modelId.toLowerCase();
-        const nameLower = name.toLowerCase();
-        
-        // Check for image-to-video patterns
-        if (idLower.includes('image-to-video') || 
-            idLower.includes('image2video') || 
-            idLower.includes('img2video') ||
-            nameLower.includes('image-to-video') ||
-            nameLower.includes('image2video') ||
-            nameLower.includes('img2video')) {
-          modelType = 'image-to-video';
-        } else {
-          // Default to text-to-video if no pattern matches
-          modelType = 'text-to-video';
-        }
+        console.log('Skipping model without model_type:', modelId);
+        return;
       }
       
       // Extract badge from name or id
       let badge = null;
-      if (name.toLowerCase().includes('fast') || model.id.includes('fast')) {
+      const nameLower = name.toLowerCase();
+      const idLower = modelId.toLowerCase();
+      if (nameLower.includes('fast') || idLower.includes('fast')) {
         badge = 'fast';
-      } else if (name.toLowerCase().includes('full') || model.id.includes('full')) {
+      } else if (nameLower.includes('full') || idLower.includes('full')) {
         badge = 'full';
-      } else if (name.toLowerCase().includes('pro') || model.id.includes('pro')) {
+      } else if (nameLower.includes('pro') || idLower.includes('pro')) {
         badge = 'pro';
+      } else if (nameLower.includes('turbo') || idLower.includes('turbo')) {
+        badge = 'fast';
       }
       
       // Parse durations (convert "5s" to 5)
-      const durations = (constraints.durations || []).map(d => parseInt(d.replace('s', '')));
+      const durations = (constraints.durations || []).map(d => {
+        if (typeof d === 'string') {
+          return parseInt(d.replace('s', ''));
+        }
+        return d;
+      });
       
       // Get resolutions
       const resolutions = constraints.resolutions || [];
@@ -132,42 +130,39 @@ async function loadModels(token) {
         offline: model.model_spec?.offline || false
       };
       
-      // Categorize model by type
-      if (modelType === 'image-to-video' || modelType === 'image2video' || modelType === 'img2video') {
+      // Categorize model by model_type from API
+      if (modelType === 'image-to-video') {
         MODELS['image-to-video'].push(modelData);
-      } else {
-        // Default to text-to-video
+      } else if (modelType === 'text-to-video') {
         MODELS['text-to-video'].push(modelData);
       }
     });
     
-    appState.modelsLoaded = true;
-    
     // Log model counts for debugging
     console.log('Models loaded from API:', {
       'text-to-video': MODELS['text-to-video'].length,
-      'image-to-video': MODELS['image-to-video'].length,
-      allModels: MODELS
+      'image-to-video': MODELS['image-to-video'].length
     });
+    
+    appState.modelsLoaded = true;
     
     // Render models for current mode
     renderModels();
     
     // Show success message if models were loaded
-    if (MODELS['text-to-video'].length > 0 || MODELS['image-to-video'].length > 0) {
-      const mode = appState.mode;
-      const count = MODELS[mode].length;
-      if (count > 0) {
-        showToast(`${count} ${mode} model${count > 1 ? 's' : ''} loaded`, 'success');
-      }
+    const totalModels = MODELS['text-to-video'].length + MODELS['image-to-video'].length;
+    if (totalModels > 0) {
+      showToast(`Loaded ${MODELS['text-to-video'].length} text-to-video and ${MODELS['image-to-video'].length} image-to-video models`, 'success');
     }
   } catch (error) {
-    console.error('Error loading models:', error);
-    const errorMsg = token 
-      ? 'Failed to load models with your API key. Please check that your API key is valid.'
-      : 'Failed to load models. Please enter your API key or check server configuration.';
-    showErrorModal(errorMsg);
+    console.error('Error loading models from API:', error);
     appState.modelsLoaded = false;
+    renderModels();
+    
+    const errorMsg = token 
+      ? 'Failed to load models. Please check your API key.'
+      : 'Failed to load models. Please enter your API key.';
+    showToast(errorMsg, 'error');
   }
 }
 
