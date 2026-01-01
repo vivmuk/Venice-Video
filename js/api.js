@@ -2,24 +2,42 @@
 // Now uses server-side proxy endpoints (API token is stored on server)
 
 class VeniceAPI {
-  constructor() {
-    // No token needed - server handles authentication
-    this.baseUrl = '/api/video'; // Use server proxy
-    this.modelsBaseUrl = '/api'; // Use server proxy
+  constructor(customToken = null) {
+    // Check for custom token (user-provided when server key expires)
+    this.customToken = customToken || (typeof getApiKey === 'function' ? getApiKey() : null);
+
+    if (this.customToken) {
+      // Use direct Venice API with custom token
+      this.baseUrl = 'https://api.venice.ai/api/v1/video';
+      this.modelsBaseUrl = 'https://api.venice.ai/api/v1';
+      this.useDirectApi = true;
+    } else {
+      // Use server proxy (server handles authentication)
+      this.baseUrl = '/api/video';
+      this.modelsBaseUrl = '/api';
+      this.useDirectApi = false;
+    }
   }
 
-  // Helper method for API requests (now goes through server proxy)
+  // Helper method for API requests (uses server proxy or direct API with custom token)
   async request(endpoint, options = {}) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
 
     try {
+      const headers = {
+        'Content-Type': 'application/json',
+        ...options.headers
+      };
+
+      // Add authorization header if using custom token
+      if (this.useDirectApi && this.customToken) {
+        headers['Authorization'] = `Bearer ${this.customToken}`;
+      }
+
       const response = await fetch(`${this.baseUrl}${endpoint}`, {
         ...options,
-        headers: {
-          'Content-Type': 'application/json',
-          ...options.headers
-        },
+        headers,
         signal: controller.signal
       });
 
@@ -355,13 +373,20 @@ class VeniceAPI {
     };
   }
 
-  // Fetch available video models from API (via server proxy)
+  // Fetch available video models from API (via server proxy or direct with custom token)
   async getModels() {
     try {
+      const headers = {
+        'Content-Type': 'application/json'
+      };
+
+      // Add authorization header if using custom token
+      if (this.useDirectApi && this.customToken) {
+        headers['Authorization'] = `Bearer ${this.customToken}`;
+      }
+
       const response = await fetch(`${this.modelsBaseUrl}/models`, {
-        headers: {
-          'Content-Type': 'application/json'
-        }
+        headers
       });
 
       if (!response.ok) {

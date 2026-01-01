@@ -1247,3 +1247,148 @@ main {
 .cost-details strong {
   color: var(--text-primary);
 }
+
+/* API Key Section */
+.api-key-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.api-key-toggle:hover {
+  background: var(--bg-accent);
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.api-key-toggle.active {
+  background: var(--accent-primary);
+  color: var(--bg-card);
+  border-color: var(--accent-primary);
+}
+
+.api-key-toggle svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.api-key-section {
+  border-top: 1px solid var(--border-light);
+  padding: var(--space-md) 0;
+  margin-top: var(--space-sm);
+  animation: slideDown 0.3s ease;
+}
+
+.api-key-section.hidden {
+  display: none;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.api-key-content {
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.api-key-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-bottom: var(--space-md);
+}
+
+.api-key-info svg {
+  fill: none;
+  stroke: var(--info);
+  stroke-width: 2;
+  flex-shrink: 0;
+}
+
+.api-key-input-wrapper {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+}
+
+.api-key-input-wrapper .form-input {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+}
+
+.api-key-visibility {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.api-key-visibility:hover {
+  background: var(--bg-accent);
+  color: var(--text-secondary);
+}
+
+.api-key-visibility svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.api-key-save {
+  white-space: nowrap;
+}
+
+.api-key-status {
+  margin-top: var(--space-sm);
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.api-key-status.success {
+  color: var(--success);
+}
+
+.api-key-status.error {
+  color: var(--error);
+}
+
+.api-key-status.using-custom {
+  color: var(--info);
+}
+
+.api-key-status.info {
+  color: var(--text-muted);
+}

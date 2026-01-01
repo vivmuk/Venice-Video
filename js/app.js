@@ -19,7 +19,8 @@ const appState = {
   selectedDuration: null,
   selectedResolution: null,
   selectedAspectRatio: '16:9',
-  modelsLoaded: false
+  modelsLoaded: false,
+  customApiKey: null // User's custom API key (if server key expired)
 };
 
 // Initialize App
@@ -28,6 +29,9 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function initializeApp() {
+  // Initialize custom API key from localStorage
+  initializeApiKey();
+
   // Setup prompt counter
   setupPromptCounter();
 
@@ -45,8 +49,10 @@ async function initializeApp() {
     showErrorModal(e.reason?.message || 'An unexpected error occurred');
   });
 
-  // Load models automatically (API token is on server)
-  await loadModels();
+  // Load models automatically (API token is on server or from custom key)
+  // Use custom API key if available
+  const customKey = getApiKey();
+  await loadModels(customKey);
 
   // Render initial models
   renderModels();
@@ -602,8 +608,9 @@ async function handleGenerate() {
       params.resolution = appState.selectedResolution;
     }
 
-    // Create API instance and queue (no token needed - server handles it)
-    const api = new VeniceAPI();
+    // Create API instance with custom key if available
+    const customKey = getApiKey();
+    const api = new VeniceAPI(customKey);
     const response = await api.queue(params);
 
     if (!response.queue_id) {
@@ -814,7 +821,9 @@ async function handleEstimate() {
       params.resolution = appState.selectedResolution;
     }
 
-    const api = new VeniceAPI(); // No token needed - server handles it
+    // Create API instance with custom key if available
+    const customKey = getApiKey();
+    const api = new VeniceAPI(customKey);
     const quote = await api.quote(params);
 
     estimateBtn.disabled = false;
@@ -951,6 +960,99 @@ function closeErrorModal() {
   document.getElementById('error-modal').classList.remove('active');
 }
 
+// API Key Management
+function toggleApiKeySection() {
+  const section = document.getElementById('api-key-section');
+  const toggle = document.querySelector('.api-key-toggle');
+
+  section.classList.toggle('hidden');
+  toggle.classList.toggle('active');
+
+  // Load saved API key if exists
+  const savedKey = localStorage.getItem('venice_api_key');
+  if (savedKey) {
+    document.getElementById('api-key-input').value = savedKey;
+    updateApiKeyStatus('Custom API key is active', 'using-custom');
+  } else {
+    updateApiKeyStatus('Enter your Venice API key to use your own account', 'info');
+  }
+}
+
+function toggleApiKeyVisibility() {
+  const input = document.getElementById('api-key-input');
+  const eyeIcon = document.getElementById('eye-icon');
+
+  if (input.type === 'password') {
+    input.type = 'text';
+    eyeIcon.innerHTML = '<path d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>';
+  } else {
+    input.type = 'password';
+    eyeIcon.innerHTML = '<path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>';
+  }
+}
+
+async function saveApiKey() {
+  const input = document.getElementById('api-key-input');
+  const apiKey = input.value.trim();
+
+  if (!apiKey) {
+    // Clear the saved key
+    localStorage.removeItem('venice_api_key');
+    appState.customApiKey = null;
+    updateApiKeyStatus('Custom API key cleared. Using server key.', 'success');
+    showToast('API key cleared', 'info');
+    // Reload models with server key (no custom key)
+    await loadModels(null);
+    return;
+  }
+
+  // Validate key format (basic check - Venice API keys typically start with 'vn-' or are long strings)
+  if (apiKey.length < 20) {
+    updateApiKeyStatus('Invalid API key format (too short)', 'error');
+    showToast('Invalid API key format', 'error');
+    return;
+  }
+
+  // Save to localStorage
+  localStorage.setItem('venice_api_key', apiKey);
+  appState.customApiKey = apiKey;
+  updateApiKeyStatus('Custom API key saved! Reloading models...', 'success');
+  showToast('API key saved successfully', 'success');
+
+  // Reload models with new key
+  try {
+    await loadModels(apiKey);
+    updateApiKeyStatus('Custom API key active!', 'using-custom');
+  } catch (error) {
+    updateApiKeyStatus('Failed to load models with this key. Please check your API key.', 'error');
+    showToast('Failed to validate API key', 'error');
+  }
+}
+
+function updateApiKeyStatus(message, type) {
+  const status = document.getElementById('api-key-status');
+  if (message) {
+    status.textContent = message;
+    status.className = 'api-key-status ' + (type || 'info');
+    status.style.display = 'flex';
+  } else {
+    status.style.display = 'none';
+  }
+}
+
+function getApiKey() {
+  // Return custom key if set, otherwise null (server will use its key)
+  return appState.customApiKey || localStorage.getItem('venice_api_key') || null;
+}
+
+// Initialize custom API key on load
+function initializeApiKey() {
+  const savedKey = localStorage.getItem('venice_api_key');
+  if (savedKey) {
+    appState.customApiKey = savedKey;
+  }
+}
+
 // Make functions globally accessible
 window.switchMode = switchMode;
 window.selectModel = selectModel;
@@ -971,3 +1073,7 @@ window.showLoading = showLoading;
 window.hideLoading = hideLoading;
 window.showErrorModal = showErrorModal;
 window.closeErrorModal = closeErrorModal;
+window.toggleApiKeySection = toggleApiKeySection;
+window.toggleApiKeyVisibility = toggleApiKeyVisibility;
+window.saveApiKey = saveApiKey;
+window.getApiKey = getApiKey;
