@@ -73,8 +73,30 @@ async function loadModels(token) {
     
     models.forEach(model => {
       const constraints = model.model_spec?.constraints || {};
-      const modelType = constraints.model_type || 'text-to-video';
       const name = model.model_spec?.name || model.id;
+      const modelId = model.id || '';
+      
+      // Determine model type - check both constraints.model_type and model ID/name
+      let modelType = constraints.model_type;
+      
+      // If model_type is not set, check the model ID or name for patterns
+      if (!modelType) {
+        const idLower = modelId.toLowerCase();
+        const nameLower = name.toLowerCase();
+        
+        // Check for image-to-video patterns
+        if (idLower.includes('image-to-video') || 
+            idLower.includes('image2video') || 
+            idLower.includes('img2video') ||
+            nameLower.includes('image-to-video') ||
+            nameLower.includes('image2video') ||
+            nameLower.includes('img2video')) {
+          modelType = 'image-to-video';
+        } else {
+          // Default to text-to-video if no pattern matches
+          modelType = 'text-to-video';
+        }
+      }
       
       // Extract badge from name or id
       let badge = null;
@@ -110,19 +132,41 @@ async function loadModels(token) {
         offline: model.model_spec?.offline || false
       };
       
-      if (modelType === 'text-to-video') {
-        MODELS['text-to-video'].push(modelData);
-      } else if (modelType === 'image-to-video') {
+      // Categorize model by type
+      if (modelType === 'image-to-video' || modelType === 'image2video' || modelType === 'img2video') {
         MODELS['image-to-video'].push(modelData);
+      } else {
+        // Default to text-to-video
+        MODELS['text-to-video'].push(modelData);
       }
     });
     
     appState.modelsLoaded = true;
+    
+    // Log model counts for debugging
+    console.log('Models loaded from API:', {
+      'text-to-video': MODELS['text-to-video'].length,
+      'image-to-video': MODELS['image-to-video'].length,
+      allModels: MODELS
+    });
+    
+    // Render models for current mode
     renderModels();
-    console.log('Models loaded from API:', MODELS);
+    
+    // Show success message if models were loaded
+    if (MODELS['text-to-video'].length > 0 || MODELS['image-to-video'].length > 0) {
+      const mode = appState.mode;
+      const count = MODELS[mode].length;
+      if (count > 0) {
+        showToast(`${count} ${mode} model${count > 1 ? 's' : ''} loaded`, 'success');
+      }
+    }
   } catch (error) {
     console.error('Error loading models:', error);
-    showErrorModal('Failed to load models. Please check server configuration and ensure VENICE_API_TOKEN is set in Railway environment variables.');
+    const errorMsg = token 
+      ? 'Failed to load models with your API key. Please check that your API key is valid.'
+      : 'Failed to load models. Please enter your API key or check server configuration.';
+    showErrorModal(errorMsg);
     appState.modelsLoaded = false;
   }
 }
@@ -152,12 +196,38 @@ function switchMode(mode) {
 function renderModels() {
   const grid = document.getElementById('model-grid');
   const models = MODELS[appState.mode] || [];
+  const otherMode = appState.mode === 'text-to-video' ? 'image-to-video' : 'text-to-video';
+  const otherModelsCount = MODELS[otherMode]?.length || 0;
+  const totalModelsCount = MODELS['text-to-video']?.length + MODELS['image-to-video']?.length || 0;
 
   if (models.length === 0) {
+    let message = '';
+    if (totalModelsCount === 0) {
+      // No models loaded at all
+      message = `
+        <p style="margin-bottom: var(--space-md);">No models available. Please enter your API key to load models.</p>
+        <p style="font-size: 0.9rem;">Click the key icon in the header to add your Venice API key.</p>
+      `;
+    } else if (otherModelsCount > 0) {
+      // Models loaded for other mode but not this one
+      const modeDisplay = appState.mode.replace(/-/g, ' ');
+      const otherModeDisplay = otherMode.replace(/-/g, ' ');
+      message = `
+        <p style="margin-bottom: var(--space-md);">No ${modeDisplay} models available.</p>
+        <p style="font-size: 0.9rem;">${otherModelsCount} ${otherModeDisplay} model${otherModelsCount > 1 ? 's' : ''} loaded. Switch to ${otherModeDisplay} mode to see them.</p>
+      `;
+    } else {
+      // Models loaded but none for this mode
+      const modeDisplay = appState.mode.replace(/-/g, ' ');
+      message = `
+        <p style="margin-bottom: var(--space-md);">No ${modeDisplay} models found.</p>
+        <p style="font-size: 0.9rem;">Your API key may not have access to ${modeDisplay} models.</p>
+      `;
+    }
+    
     grid.innerHTML = `
       <div style="grid-column: 1 / -1; text-align: center; padding: var(--space-xl); color: var(--text-muted);">
-        <p style="margin-bottom: var(--space-md);">No models available. Please enter your API token to load models.</p>
-        <p style="font-size: 0.9rem;">Models will be automatically loaded when you enter a valid API token.</p>
+        ${message}
       </div>
     `;
     return;
@@ -1002,7 +1072,11 @@ async function saveApiKey() {
     updateApiKeyStatus('Custom API key cleared. Using server key.', 'success');
     showToast('API key cleared', 'info');
     // Reload models with server key (no custom key)
-    await loadModels(null);
+    try {
+      await loadModels(null);
+    } catch (error) {
+      console.error('Error loading models after clearing key:', error);
+    }
     return;
   }
 
@@ -1017,13 +1091,26 @@ async function saveApiKey() {
   localStorage.setItem('venice_api_key', apiKey);
   appState.customApiKey = apiKey;
   updateApiKeyStatus('Custom API key saved! Reloading models...', 'success');
-  showToast('API key saved successfully', 'success');
+  showToast('API key saved. Loading models...', 'info');
 
   // Reload models with new key
   try {
     await loadModels(apiKey);
-    updateApiKeyStatus('Custom API key active!', 'using-custom');
+    
+    // Check if models were loaded successfully
+    const textToVideoCount = MODELS['text-to-video'].length;
+    const imageToVideoCount = MODELS['image-to-video'].length;
+    const totalCount = textToVideoCount + imageToVideoCount;
+    
+    if (totalCount > 0) {
+      updateApiKeyStatus(`Custom API key active! ${textToVideoCount} text-to-video, ${imageToVideoCount} image-to-video models loaded.`, 'using-custom');
+      showToast(`Successfully loaded ${totalCount} model${totalCount > 1 ? 's' : ''}`, 'success');
+    } else {
+      updateApiKeyStatus('API key valid but no models found. Check your API key permissions.', 'error');
+      showToast('No models found with this API key', 'warning');
+    }
   } catch (error) {
+    console.error('Error loading models with custom key:', error);
     updateApiKeyStatus('Failed to load models with this key. Please check your API key.', 'error');
     showToast('Failed to validate API key', 'error');
   }
