@@ -184,7 +184,7 @@ function switchMode(mode) {
   renderModels();
 
   // Reset selected model info
-  document.getElementById('selected-model-info').innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem;">Select a model to see details</p>';
+  document.getElementById('selected-model-info').innerHTML = '<p class="select-hint">Select a model above to begin</p>';
 }
 
 // Render Models
@@ -229,32 +229,13 @@ function renderModels() {
   }
 
   grid.innerHTML = models.map(model => {
-    const durations = model.durations && model.durations.length > 0 
-      ? model.durations.join('s, ') + 's' 
-      : 'N/A';
-    const resolutions = model.resolutions && model.resolutions.length > 0 
-      ? model.resolutions.join(', ') 
-      : 'N/A';
-    
+    const offlineBadge = model.offline ? '<span class="model-badge" style="background:var(--error);">Off</span>' : '';
+    const badge = model.badge ? `<span class="model-badge ${model.badge}">${model.badge}</span>` : '';
     return `
       <div class="model-card" data-model-id="${model.id}" onclick="selectModel('${model.id}')">
         <div class="model-header">
           <span class="model-name">${model.name}</span>
-          ${model.badge ? `<span class="model-badge ${model.badge}">${model.badge}</span>` : ''}
-          ${model.offline ? '<span class="model-badge" style="background: var(--error);">Offline</span>' : ''}
-        </div>
-        <div class="model-features">
-          <span class="feature-tag">
-            <svg viewBox="0 0 24 24"><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-            ${durations}
-          </span>
-          ${resolutions !== 'N/A' ? `
-          <span class="feature-tag">
-            <svg viewBox="0 0 24 24"><path d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-            ${resolutions}
-          </span>
-          ` : ''}
-          ${model.audio ? '<span class="feature-tag audio"><svg viewBox="0 0 24 24"><path d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>Audio</span>' : ''}
+          ${badge}${offlineBadge}
         </div>
       </div>
     `;
@@ -377,15 +358,15 @@ function setupAspectRatioPills() {
 // Update Selected Model Info
 function updateSelectedModelInfo(model) {
   const container = document.getElementById('selected-model-info');
+  const durStr = model.durations.length ? model.durations.join(', ') + 's' : '';
+  const resStr = model.resolutions.length ? model.resolutions.join(', ') : '';
   container.innerHTML = `
-    <div style="margin-bottom: var(--space-md);">
-      <h4 style="font-family: var(--font-display); font-size: 1.1rem; margin-bottom: var(--space-xs);">${model.name}</h4>
-      <p style="font-size: 0.8rem; color: var(--text-muted);">${model.id}</p>
-    </div>
-    <div style="display: flex; flex-wrap: wrap; gap: var(--space-xs);">
-      <span class="feature-tag">Duration: ${model.durations.join(', ')}s</span>
-      <span class="feature-tag">Resolution: ${model.resolutions.join(', ')}</span>
-      ${model.audio ? '<span class="feature-tag audio">Audio Supported</span>' : ''}
+    <p class="selected-model-name">${model.name}</p>
+    <p class="selected-model-id">${model.id}</p>
+    <div class="selected-model-tags">
+      ${durStr ? `<span class="feature-tag">${durStr}</span>` : ''}
+      ${resStr ? `<span class="feature-tag">${resStr}</span>` : ''}
+      ${model.audio ? '<span class="feature-tag audio">Audio</span>' : ''}
     </div>
   `;
 }
@@ -693,7 +674,8 @@ async function handleGenerate() {
 
     // Show progress section
     document.getElementById('progress-section').classList.remove('hidden');
-    document.getElementById('queue-id').textContent = response.queue_id.substring(0, 8) + '...';
+    const queueDisplay = document.getElementById('queue-id-display');
+    if (queueDisplay) queueDisplay.textContent = 'ID: ' + response.queue_id.substring(0, 16) + '...';
 
     console.log('Starting polling with queue_id:', response.queue_id, 'model:', response.model);
 
@@ -742,8 +724,6 @@ async function pollForCompletion(api, queueId, modelId = null) {
 
       if (status.status === 'completed' && status.video_url) {
         // Success!
-        appState.videoUrl = status.video_url;
-        appState.videoBlob = status.video_blob; // Store blob for download
         appState.isProcessing = false;
 
         document.getElementById('status-badge').className = 'status-badge status-success';
@@ -751,38 +731,33 @@ async function pollForCompletion(api, queueId, modelId = null) {
         document.getElementById('progress-fill').style.width = '100%';
         document.getElementById('progress-value').textContent = '100%';
 
-        // Show video section
-        document.getElementById('video-section').classList.remove('hidden');
         const videoPlayer = document.getElementById('video-player');
-        
-        // Set video source - use blob URL
-        if (status.video_url && status.video_url.startsWith('blob:')) {
-          videoPlayer.src = status.video_url;
-        } else if (status.video_blob) {
-          // Create blob URL if not already created
+
+        // Prefer blob (already fetched) to avoid a second network round-trip.
+        // status.video_url may be blob:, https:, or any other scheme — all work as src.
+        if (status.video_blob) {
           const blobUrl = URL.createObjectURL(status.video_blob);
+          appState.videoUrl = blobUrl;
+          appState.videoBlob = status.video_blob;
           videoPlayer.src = blobUrl;
-          appState.videoUrl = blobUrl; // Update stored URL
+        } else {
+          appState.videoUrl = status.video_url;
+          videoPlayer.src = status.video_url;
         }
 
-        // Handle video load errors - but don't show error modal for CSP issues
-        // The video can still be downloaded even if it can't be displayed
-        videoPlayer.onerror = (e) => {
-          console.error('Video load error:', e);
-          // Check if it's a CSP error
-          const errorMsg = e.message || '';
-          if (errorMsg.includes('Content Security Policy') || errorMsg.includes('CSP')) {
-            console.warn('CSP blocking video playback, but video is available for download');
-            // Don't show error modal for CSP issues - video can still be downloaded
-          } else {
-            showErrorModal('Failed to load video. You can still download it using the Download button.');
-          }
+        videoPlayer.load();
+
+        videoPlayer.onerror = () => {
+          console.error('Video load error');
+          showToast('Video ready — use Download if preview does not play.', 'warning');
         };
-        
-        // Also listen for loadeddata event to confirm video loaded successfully
-        videoPlayer.onloadeddata = () => {
-          console.log('Video loaded successfully');
-        };
+
+        videoPlayer.onloadeddata = () => console.log('Video loaded successfully');
+
+        // Show full-width video section and scroll to it
+        const videoSection = document.getElementById('video-section');
+        videoSection.classList.remove('hidden');
+        setTimeout(() => videoSection.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
 
         showToast('Video generated successfully!', 'success');
         return;

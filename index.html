@@ -21,20 +21,22 @@
                     <h1>Venice <span>Video</span></h1>
                 </div>
 
-                <div class="mode-toggle">
-                    <button class="mode-btn active" data-mode="text-to-video" onclick="switchMode('text-to-video')">
-                        <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10" stroke-linecap="round"/></svg>
-                        Text to Video
-                    </button>
-                    <button class="mode-btn" data-mode="image-to-video" onclick="switchMode('image-to-video')">
-                        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-                        Image to Video
+                <div class="header-right">
+                    <div class="mode-toggle">
+                        <button class="mode-btn active" data-mode="text-to-video" onclick="switchMode('text-to-video')">
+                            <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10" stroke-linecap="round"/></svg>
+                            Text
+                        </button>
+                        <button class="mode-btn" data-mode="image-to-video" onclick="switchMode('image-to-video')">
+                            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                            Image
+                        </button>
+                    </div>
+
+                    <button class="api-key-toggle" onclick="toggleApiKeySection()" title="API Key Settings">
+                        <svg viewBox="0 0 24 24" width="18" height="18"><path d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
                     </button>
                 </div>
-
-                <button class="api-key-toggle" onclick="toggleApiKeySection()" title="API Key Settings">
-                    <svg viewBox="0 0 24 24" width="20" height="20"><path d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
-                </button>
             </div>
 
             <!-- API Key Section (collapsible) -->
@@ -42,12 +44,12 @@
                 <div class="api-key-content">
                     <div class="api-key-info">
                         <svg viewBox="0 0 24 24" width="16" height="16"><path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                        <span>Add your own Venice API key to use your account credits (optional)</span>
+                        <span>Add your Venice API key to use your account credits (optional)</span>
                     </div>
                     <div class="api-key-input-wrapper">
                         <input type="password" id="api-key-input" class="form-input" placeholder="Enter your Venice API key...">
                         <button type="button" class="api-key-visibility" onclick="toggleApiKeyVisibility()" title="Show/Hide API key">
-                            <svg id="eye-icon" viewBox="0 0 24 24" width="20" height="20"><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                            <svg id="eye-icon" viewBox="0 0 24 24" width="18" height="18"><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
                         </button>
                         <button type="button" class="btn btn-primary api-key-save" onclick="saveApiKey()">Save</button>
                     </div>
@@ -62,7 +64,6 @@
             <div class="app-layout">
                 <!-- Main Content Area -->
                 <div class="main-content">
-                    <!-- Model Selection Card -->
                     <div class="card">
                         <div class="card-header">
                             <h2 class="card-title">
@@ -72,18 +73,14 @@
                         </div>
 
                         <div id="model-grid" class="model-grid">
-                            <!-- Models will be populated by JavaScript -->
+                            <!-- Models populated by JavaScript -->
                         </div>
 
                         <!-- Text-to-Video Input -->
                         <div id="text-input-section">
                             <div class="form-section">
-                                <label class="form-label">
-                                    <svg viewBox="0 0 24 24" width="16" height="16" style="fill: var(--accent-primary); vertical-align: middle; margin-right: 6px;"><path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-                                    Prompt
-                                    <span class="form-label-hint">(Describe your video)</span>
-                                </label>
-                                <textarea id="prompt" class="form-textarea" placeholder="A cinematic shot of a sunset over mountain peaks, golden hour lighting, smooth camera movement..." rows="4"></textarea>
+                                <label class="form-label">Prompt</label>
+                                <textarea id="prompt" class="form-textarea" placeholder="A cinematic shot of a sunset over mountain peaks, golden hour lighting, smooth camera movement..." rows="3"></textarea>
                                 <div class="prompt-footer">
                                     <span id="prompt-counter" class="prompt-counter">0 / 5000</span>
                                 </div>
@@ -94,15 +91,12 @@
                         <!-- Image-to-Video Input -->
                         <div id="image-input-section" class="hidden">
                             <div class="form-section">
-                                <label class="form-label">
-                                    <svg viewBox="0 0 24 24" width="16" height="16" style="fill: var(--accent-primary); vertical-align: middle; margin-right: 6px;"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                                    Source Image
-                                </label>
+                                <label class="form-label">Source Image</label>
                                 <div id="upload-zone" class="upload-zone" ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" onclick="document.getElementById('image-upload').click()">
                                     <input type="file" id="image-upload" accept="image/*" style="display: none;" onchange="handleImageUpload(event)">
                                     <div id="upload-content">
                                         <svg class="upload-icon" viewBox="0 0 24 24"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                                        <p class="upload-text"><strong>Click to upload</strong> or drag and drop</p>
+                                        <p class="upload-text"><strong>Tap to upload</strong> or drag and drop</p>
                                         <p class="upload-hint">PNG, JPG, WEBP up to 10MB</p>
                                     </div>
                                     <div id="upload-preview" class="upload-preview" style="display: none;">
@@ -120,35 +114,34 @@
                             </div>
 
                             <div class="form-section">
-                                <label class="form-label">
-                                    Motion Prompt <span class="form-label-hint">(Optional - describe the motion)</span>
-                                </label>
+                                <label class="form-label">Motion Prompt <span class="form-label-hint">(describe the motion)</span></label>
                                 <textarea id="motion-prompt" class="form-textarea" placeholder="Gentle wind blowing through hair, subtle camera push in..." rows="2"></textarea>
                             </div>
                         </div>
 
                         <!-- Parameters -->
-                        <div class="form-section">
-                            <label class="form-label">Duration</label>
-                            <div id="duration-pills" class="param-pills">
-                                <!-- Duration options populated by JS -->
+                        <div class="params-grid">
+                            <div class="form-section">
+                                <label class="form-label">Duration</label>
+                                <div id="duration-pills" class="param-pills">
+                                    <!-- Populated by JS -->
+                                </div>
                             </div>
-                        </div>
 
-                        <div class="form-section">
-                            <label class="form-label">Aspect Ratio</label>
-                            <div class="param-pills">
-                                <button type="button" class="param-pill selected" data-ratio="16:9">16:9</button>
-                                <button type="button" class="param-pill" data-ratio="9:16">9:16</button>
-                                <button type="button" class="param-pill" data-ratio="1:1">1:1</button>
-                                <button type="button" class="param-pill" data-ratio="4:3">4:3</button>
+                            <div class="form-section">
+                                <label class="form-label">Aspect Ratio</label>
+                                <div class="param-pills">
+                                    <button type="button" class="param-pill selected" data-ratio="16:9">16:9</button>
+                                    <button type="button" class="param-pill" data-ratio="9:16">9:16</button>
+                                    <button type="button" class="param-pill" data-ratio="1:1">1:1</button>
+                                </div>
                             </div>
-                        </div>
 
-                        <div class="form-section">
-                            <label class="form-label">Resolution</label>
-                            <div id="resolution-pills" class="param-pills">
-                                <!-- Resolution options populated by JS -->
+                            <div class="form-section">
+                                <label class="form-label">Resolution</label>
+                                <div id="resolution-pills" class="param-pills">
+                                    <!-- Populated by JS -->
+                                </div>
                             </div>
                         </div>
 
@@ -179,21 +172,13 @@
 
                 <!-- Sidebar -->
                 <div class="sidebar-panel">
-                    <!-- Selected Model Info -->
-                    <div class="card" style="margin-bottom: var(--space-lg);">
-                        <div class="card-header">
-                            <h3 class="card-title">
-                                <svg viewBox="0 0 24 24"><path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                                Selected Model
-                            </h3>
-                        </div>
-                        <div id="selected-model-info">
-                            <p style="color: var(--text-muted); font-size: 0.9rem;">Select a model to see details</p>
-                        </div>
-                    </div>
-
-                    <!-- Actions -->
                     <div class="card">
+                        <!-- Selected Model Summary -->
+                        <div id="selected-model-info" class="selected-model-info">
+                            <p class="select-hint">Select a model above to begin</p>
+                        </div>
+
+                        <!-- Action Buttons -->
                         <div class="action-buttons">
                             <button id="generate-btn" class="btn btn-primary btn-block" onclick="handleGenerate()">
                                 <svg viewBox="0 0 24 24"><path d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -205,21 +190,11 @@
                             </button>
                         </div>
 
-                        <!-- Progress Section (hidden by default) -->
+                        <!-- Progress Section -->
                         <div id="progress-section" class="progress-section hidden">
-                            <div class="queue-info">
-                                <div class="queue-row">
-                                    <span class="queue-label">Queue ID</span>
-                                    <span id="queue-id" class="queue-value">-</span>
-                                </div>
-                                <div class="queue-row">
-                                    <span class="queue-label">Status</span>
-                                    <span id="status-badge" class="status-badge status-processing">Processing</span>
-                                </div>
-                                <div class="queue-row">
-                                    <span class="queue-label">Time Remaining</span>
-                                    <span id="time-remaining" class="queue-value">Calculating...</span>
-                                </div>
+                            <div class="progress-status-row">
+                                <span id="status-badge" class="status-badge status-processing">Processing</span>
+                                <span id="time-remaining" class="time-remaining">Calculating...</span>
                             </div>
                             <div class="progress-header">
                                 <span class="progress-label">Progress</span>
@@ -228,27 +203,36 @@
                             <div class="progress-bar">
                                 <div id="progress-fill" class="progress-fill"></div>
                             </div>
-                            <button id="cancel-btn" class="btn btn-secondary btn-block" style="margin-top: var(--space-lg);" onclick="handleCancel()">
+                            <p id="queue-id-display" class="queue-id-display"></p>
+                            <button id="cancel-btn" class="btn btn-secondary btn-block" style="margin-top: var(--space-md);" onclick="handleCancel()">
                                 Cancel
                             </button>
                         </div>
+                    </div>
+                </div>
+            </div>
 
-                        <!-- Video Result Section (hidden by default) -->
-                        <div id="video-section" class="hidden" style="margin-top: var(--space-lg);">
-                            <div class="video-preview">
-                                <video id="video-player" class="video-player" controls></video>
-                            </div>
-                            <div class="action-buttons">
-                                <button id="download-btn" class="btn btn-primary btn-block" onclick="handleDownload()">
-                                    <svg viewBox="0 0 24 24"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                                    Download Video
-                                </button>
-                                <button class="btn btn-secondary btn-block" onclick="handleNewGeneration()">
-                                    <svg viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                                    New Generation
-                                </button>
-                            </div>
-                        </div>
+            <!-- Video Result Section (full width, shown when complete) -->
+            <div id="video-section" class="hidden video-result-section">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">
+                            <svg viewBox="0 0 24 24"><path d="M15 10L19.5528 7.72361C20.2177 7.39116 21 7.87465 21 8.61803V15.382C21 16.1253 20.2177 16.6088 19.5528 16.2764L15 14M5 18H13C14.1046 18 15 17.1046 15 16V8C15 6.89543 14.1046 6 13 6H5C3.89543 6 3 6.89543 3 8V16C3 17.1046 3.89543 18 5 18Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            Your Video
+                        </h3>
+                    </div>
+                    <div class="video-preview">
+                        <video id="video-player" class="video-player" controls playsinline></video>
+                    </div>
+                    <div class="action-buttons action-buttons-row">
+                        <button id="download-btn" class="btn btn-primary" onclick="handleDownload()">
+                            <svg viewBox="0 0 24 24"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                            Download
+                        </button>
+                        <button class="btn btn-secondary" onclick="handleNewGeneration()">
+                            <svg viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                            New Generation
+                        </button>
                     </div>
                 </div>
             </div>
