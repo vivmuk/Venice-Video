@@ -1204,3 +1204,15 @@ main {
   fill: none;
   stroke-width: 2;
 }
+
+/* ===== Advanced references sub-heading ===== */
+.advanced-subhead {
+  margin: var(--space-md) 0 var(--space-sm);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-light);
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}

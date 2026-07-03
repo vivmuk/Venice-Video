@@ -148,7 +148,7 @@
                                 Generate with Audio
                             </label>
                             <label class="toggle-switch">
-                                <input type="checkbox" id="audio-checkbox">
+                                <input type="checkbox" id="audio-checkbox" checked>
                                 <span class="toggle-slider"></span>
                             </label>
                         </div>
@@ -183,6 +183,34 @@
                                             <svg viewBox="0 0 24 24" width="16" height="16"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                                             Random
                                         </button>
+                                    </div>
+                                </div>
+
+                                <div class="advanced-subhead">References &amp; media <span class="form-label-hint">(model-dependent — one URL per line)</span></div>
+
+                                <div class="form-section">
+                                    <label class="form-label" for="ref-image-urls">Reference Image URLs <span class="form-label-hint">(character/scene refs, up to 9)</span></label>
+                                    <textarea id="ref-image-urls" class="form-textarea" placeholder="https://example.com/character-front.jpg&#10;https://example.com/character-side.jpg" rows="2"></textarea>
+                                </div>
+
+                                <div class="form-section">
+                                    <label class="form-label" for="ref-video-urls">Reference Video URLs <span class="form-label-hint">(up to 3)</span></label>
+                                    <textarea id="ref-video-urls" class="form-textarea" placeholder="https://example.com/clip.mp4" rows="2"></textarea>
+                                </div>
+
+                                <div class="form-section">
+                                    <label class="form-label" for="ref-audio-urls">Reference Audio URLs <span class="form-label-hint">(up to 3 — must accompany an image/video ref)</span></label>
+                                    <textarea id="ref-audio-urls" class="form-textarea" placeholder="https://example.com/voice.mp3" rows="2"></textarea>
+                                </div>
+
+                                <div class="params-grid">
+                                    <div class="form-section">
+                                        <label class="form-label" for="end-image-url">End Frame Image URL <span class="form-label-hint">(transitions)</span></label>
+                                        <input type="url" id="end-image-url" class="form-input" placeholder="https://example.com/end.jpg">
+                                    </div>
+                                    <div class="form-section">
+                                        <label class="form-label" for="ref-video-duration">Reference Video Duration <span class="form-label-hint">(seconds, Seedance)</span></label>
+                                        <input type="number" id="ref-video-duration" class="form-input" placeholder="e.g. 5" min="1" step="1">
                                     </div>
                                 </div>
                             </div>
