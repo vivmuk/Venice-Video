@@ -7,9 +7,19 @@ A clean, Swiss-designed interface for generating videos using the Venice AI API.
 - **Model-aware parameters**: The request sent to Venice is built per-model from the
   model's own `constraints`, so only supported parameters are included (duration,
   aspect ratio, resolution, audio) and invalid values are coerced to a valid option.
-- **Text-, Image- and Reference-to-Video**: Reference-to-video models are supported —
-  the uploaded image is sent as `reference_image_urls` instead of `image_url`.
-- **Advanced options**: Negative prompt, seed (with randomizer), audio toggle, and
+- **Self-healing requests**: Every model accepts a *different* set of parameters. If
+  Venice rejects a specific field (e.g. `"This model does not support audio
+  configuration"`), the app strips exactly that field — read from the API's own error
+  `path` — and retries, so a generation never fails just because one optional
+  parameter isn't supported by the chosen model.
+- **Text-, Image-, Reference- and Video-to-Video**: Reference-to-video models are
+  supported — images/videos are sent as `reference_image_urls` / `reference_video_urls`.
+- **Full reference & media inputs**: Reference images, reference videos, reference
+  audio, end frame, and Seedance's reference-video duration are all exposed as
+  advanced fields and passed through to the API.
+- **Audio on by default**: For models that support audio generation, the audio toggle
+  defaults to ON.
+- **Advanced options**: Negative prompt, seed (with randomizer), and
   auto-delete-on-completion are all wired through to the API.
 - **Automatic reference fallback**: If a model rejects `image_url` and requires a
   reference array, the app automatically retries with `reference_image_urls`.
@@ -19,8 +29,10 @@ A clean, Swiss-designed interface for generating videos using the Venice AI API.
 ## Supported request parameters
 
 The app builds `POST /video/queue` (and `/video/quote`) bodies from the following
-fields, matching the current Venice video API. Each is only included when the
-selected model supports it:
+fields, matching the current Venice video API (verified against
+[veniceai/api-docs](https://github.com/veniceai/api-docs)). Each is only included
+when the selected model supports it, and any field the API reports as unsupported for
+a given model is dropped automatically on retry:
 
 | Parameter | Type | Notes |
 |-----------|------|-------|
@@ -28,16 +40,27 @@ selected model supports it:
 | `prompt` | string | Required for text-to-video; also used as the motion prompt for image/reference models. |
 | `negative_prompt` | string | Optional. What to avoid. |
 | `duration` | string | Sent as `"5s"`, `"8s"`, … and validated against the model's `durations`. |
-| `aspect_ratio` | string | Only sent when the model advertises `aspect_ratios` (e.g. `16:9`, `9:16`, `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `21:9`). |
+| `aspect_ratio` | string | Only sent when the model advertises `aspect_ratios` (`16:9`, `9:16`, `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `21:9`). |
 | `resolution` | string | Only sent when supported (`480p`/`720p`/`1080p`/`2160p`). |
 | `seed` | integer | Optional. Reuse for reproducible results. |
-| `audio` | boolean | Only sent when the model supports audio generation. |
+| `audio` | boolean | Sent when the model supports audio; defaults ON. Auto-stripped if the model rejects it. |
 | `image_url` | string (URL) | Image-to-video starting frame. |
-| `reference_image_urls` | string[] | Reference-to-video character/scene references (up to 9). |
+| `end_image_url` | string (URL) | Optional end frame / transition target. |
+| `video_url` | string (URL) | Source clip for video-to-video models. |
+| `audio_url` | string (URL) | Audio input for models that accept it. |
+| `reference_image_urls` | string[] | Character/scene references (up to 9). |
+| `reference_video_urls` | string[] | Reference video clips (up to 3). |
+| `reference_audio_urls` | string[] | Reference audio donors (up to 3). Must accompany an image/video reference — audio-only is rejected. |
+| `scene_image_urls` | string[] | Scene references (up to 4). |
+| `elements` | object[] | Multi-character structure (up to 4): `{ frontal_image_url, reference_image_urls, video_url }`. |
+| `reference_video_total_duration` | integer | Seedance 2.0 reference-video total duration (seconds). |
+| `upscale_factor` | integer | For upscale models (`1`, `2`, `4`). |
 
 > The app reads the live model list from `GET /models?type=video` and derives each
-> model's input mode (text / image / reference) from its id and `model_type`, so new
-> models added by Venice are picked up automatically.
+> model's input mode (text / image / reference / video) from its id and `model_type`,
+> so new models added by Venice are picked up automatically. Because model parameter
+> support varies, the request builder plus the self-healing retry together ensure only
+> the parameters a given model actually accepts end up in the final request.
 
 ## Usage
 

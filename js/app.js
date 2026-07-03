@@ -273,8 +273,10 @@ function selectModel(modelId) {
   // Update aspect ratio pills based on model constraints
   renderAspectRatioPills(model.aspectRatios || []);
 
-  // Show/hide audio toggle
+  // Show/hide audio toggle. Audio defaults ON for models that support it.
   document.getElementById('audio-toggle').classList.toggle('hidden', !model.audio);
+  const audioCheckbox = document.getElementById('audio-checkbox');
+  if (audioCheckbox && model.audio) audioCheckbox.checked = true;
 
   // Reference-to-video models use the image as a character/scene reference.
   const refHint = document.getElementById('reference-hint');
@@ -550,8 +552,15 @@ function validateForm() {
       errors['prompt'] = 'Prompt must be 5000 characters or less';
     }
   } else {
-    if (!appState.uploadedImageUrl) {
-      errors['image-url'] = 'Please upload an image';
+    // Valid input = an uploaded image, OR reference image/video URLs supplied
+    // in the advanced fields (for reference-to-video models).
+    const refImgEl = document.getElementById('ref-image-urls');
+    const refVidEl = document.getElementById('ref-video-urls');
+    const hasRefUrls = (refImgEl && refImgEl.value.trim()) || (refVidEl && refVidEl.value.trim());
+    if (!appState.uploadedImageUrl && !hasRefUrls) {
+      errors['image-url'] = appState.selectedModel && appState.selectedModel.requiresReference
+        ? 'Please upload an image or add reference image/video URLs'
+        : 'Please upload an image';
     }
     // Also check for motion prompt (required for image-to-video)
     const motionPrompt = document.getElementById('motion-prompt').value.trim();
@@ -620,15 +629,47 @@ function buildGenerationParams() {
   const seed = document.getElementById('seed-input');
   if (seed && seed.value.trim() !== '') params.seed = seed.value.trim();
 
-  // Prompt + visual input.
+  // Parse a textarea/input of URLs separated by newlines or commas.
+  const parseUrlList = (id) => {
+    const el = document.getElementById(id);
+    if (!el || !el.value.trim()) return [];
+    return el.value.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+  };
+  const oneUrl = (id) => {
+    const el = document.getElementById(id);
+    return el && el.value.trim() ? el.value.trim() : '';
+  };
+
+  // Advanced reference / media fields (each maps to a Venice video-queue param).
+  const refImageUrls = parseUrlList('ref-image-urls');
+  const refVideoUrls = parseUrlList('ref-video-urls');
+  const refAudioUrls = parseUrlList('ref-audio-urls');
+  const endImageUrl = oneUrl('end-image-url');
+  const refVideoDur = document.getElementById('ref-video-duration');
+
+  if (refVideoUrls.length) params.reference_video_urls = refVideoUrls;
+  if (refAudioUrls.length) params.reference_audio_urls = refAudioUrls;
+  if (endImageUrl) params.end_image_url = endImageUrl;
+  if (refVideoDur && refVideoDur.value.trim() !== '') {
+    params.reference_video_total_duration = refVideoDur.value.trim();
+  }
+
+  // Prompt + primary visual input.
   if (appState.mode === 'text-to-video') {
     params.prompt = document.getElementById('prompt').value.trim();
+    // Text models may still take explicit reference images (advanced).
+    if (refImageUrls.length) params.reference_image_urls = refImageUrls;
   } else {
-    const imageUrl = appState.uploadedImageUrl || '';
+    const uploaded = appState.uploadedImageUrl || '';
+    // The uploaded image plus any extra reference image URLs.
     if (model.requiresReference) {
-      params.reference_image_urls = imageUrl ? [imageUrl] : [];
+      const all = [];
+      if (uploaded) all.push(uploaded);
+      all.push(...refImageUrls);
+      params.reference_image_urls = all;
     } else {
-      params.image_url = imageUrl;
+      if (uploaded) params.image_url = uploaded;
+      if (refImageUrls.length) params.reference_image_urls = refImageUrls;
     }
     params.prompt = document.getElementById('motion-prompt').value.trim();
   }

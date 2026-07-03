@@ -124,7 +124,12 @@ class VeniceAPI {
       500: 'Server Error: Venice API is experiencing issues. Try again later.'
     };
 
-    throw new Error(errorMessages[response.status] || `HTTP Error: ${response.status}`);
+    // Preserve structured data so callers can self-heal (strip an unsupported
+    // parameter and retry) rather than surfacing a raw validation error.
+    const err = new Error(errorMessages[response.status] || `HTTP Error: ${response.status}`);
+    err.status = response.status;
+    err.apiError = errorData;
+    throw err;
   }
 
   // Determine how a model consumes visual input based on its id/constraints.
@@ -197,8 +202,9 @@ class VeniceAPI {
       if (!isNaN(s)) body.seed = s;
     }
 
-    // Visual inputs, routed by the model's input mode.
-    const refs = (params.reference_image_urls || []).filter(Boolean);
+    // Primary visual input, routed by the model's input mode.
+    const toArr = (v) => Array.isArray(v) ? v.filter(Boolean) : (v ? [v] : []);
+    const refs = toArr(params.reference_image_urls);
     if (mode === 'reference') {
       // Reference-to-video: characters/scenes via reference_image_urls (max 9).
       const all = refs.slice();
@@ -207,22 +213,179 @@ class VeniceAPI {
     } else if (mode === 'image') {
       // Image-to-video: single starting frame. Pass any extra refs through too.
       if (params.image_url) body.image_url = params.image_url;
-      if (params.end_image_url) body.end_image_url = params.end_image_url;
       if (refs.length) body.reference_image_urls = refs.slice(0, 9);
     } else if (mode === 'video') {
       if (params.video_url) body.video_url = params.video_url;
+    } else {
+      // text-to-video: still honour explicit reference images if the user
+      // supplied them (some text models accept style/character references).
+      if (refs.length) body.reference_image_urls = refs.slice(0, 9);
+    }
+
+    // Additional optional media/reference inputs (model-dependent). These are
+    // passed through whenever provided so every Venice video-queue field is
+    // reachable. Caps mirror the documented maximums.
+    if (params.end_image_url) body.end_image_url = params.end_image_url;
+    if (params.video_url && mode !== 'video') body.video_url = params.video_url;
+    if (params.audio_url) body.audio_url = params.audio_url;
+
+    const refVideos = toArr(params.reference_video_urls);
+    if (refVideos.length) body.reference_video_urls = refVideos.slice(0, 3);
+
+    const refAudio = toArr(params.reference_audio_urls);
+    if (refAudio.length) body.reference_audio_urls = refAudio.slice(0, 3);
+
+    const sceneImgs = toArr(params.scene_image_urls);
+    if (sceneImgs.length) body.scene_image_urls = sceneImgs.slice(0, 4);
+
+    if (Array.isArray(params.elements) && params.elements.length) {
+      body.elements = params.elements.slice(0, 4);
+    }
+
+    if (params.reference_video_total_duration !== undefined && params.reference_video_total_duration !== null && params.reference_video_total_duration !== '') {
+      const d = parseInt(params.reference_video_total_duration);
+      if (!isNaN(d)) body.reference_video_total_duration = d;
+    }
+
+    if (params.upscale_factor !== undefined && params.upscale_factor !== null && params.upscale_factor !== '') {
+      const u = parseInt(params.upscale_factor);
+      if (!isNaN(u)) body.upscale_factor = u;
+    }
+
+    // Escape hatch: merge any raw custom fields verbatim (advanced users /
+    // forward-compat with new Venice parameters). Explicit fields win.
+    if (params.customFields && typeof params.customFields === 'object') {
+      for (const [k, v] of Object.entries(params.customFields)) {
+        if (v !== undefined && v !== null && v !== '' && !(k in body)) {
+          body[k] = v;
+        }
+      }
     }
 
     return { body, mode };
   }
 
-  // Submit a request body to a queue-shaped endpoint and normalise the response.
-  async _submitQueue(body) {
-    console.log('Queue request body:', JSON.stringify(body, null, 2));
-    const data = await this.request('/queue', {
-      method: 'POST',
-      body: JSON.stringify(body)
-    });
+  // Extract the request-body field names an API 400 flagged as unsupported /
+  // invalid / unrecognised, so the caller can strip them and retry. This is how
+  // we cope with every model having a different accepted parameter set without
+  // hardcoding per-model schemas — the API's own validation is the source of
+  // truth. Only fields whose message reads as "not accepted" are returned;
+  // "required"/"missing" fields are left for the reference fallback instead.
+  static unsupportedFields(apiError) {
+    if (!apiError || typeof apiError !== 'object') return [];
+    const fields = new Set();
+    const isUnsupported = (m) => typeof m === 'string' &&
+      /not support|unsupported|unrecogni|unexpected|not allowed|not permitted|cannot be|must not|invalid|no longer|not applicable|not available for/i.test(m) &&
+      !/required|missing|at least one|must be provided|must be one of/i.test(m);
+
+    if (Array.isArray(apiError.issues)) {
+      for (const issue of apiError.issues) {
+        if (issue && Array.isArray(issue.path) && issue.path.length && isUnsupported(issue.message)) {
+          fields.add(String(issue.path[0]));
+        }
+      }
+    }
+    // Zod-style nested details: { <field>: { _errors: [...] } }
+    if (apiError.details && typeof apiError.details === 'object') {
+      for (const [key, val] of Object.entries(apiError.details)) {
+        if (key === '_errors') continue;
+        const errs = val && val._errors;
+        if (Array.isArray(errs) && errs.some(isUnsupported)) fields.add(key);
+      }
+    }
+    return [...fields];
+  }
+
+  // POST a body to a queue-shaped endpoint, self-healing on 400s: strip any
+  // parameter the model rejects (or promote image_url -> reference_image_urls
+  // when references are required) and retry until the request is accepted.
+  async _submitHealing(endpoint, initialBody) {
+    let body = { ...initialBody };
+    let promotedRefs = false;
+    const stripped = [];
+
+    for (let attempt = 0; attempt < 8; attempt++) {
+      try {
+        console.log(`${endpoint} request body:`, JSON.stringify(body, null, 2));
+        const data = await this.request(endpoint, { method: 'POST', body: JSON.stringify(body) });
+        if (stripped.length) console.warn(`Succeeded after dropping unsupported params: ${stripped.join(', ')}`);
+        return data;
+      } catch (err) {
+        if (err.status !== 400 || !err.apiError) throw err;
+
+        // 1) References required -> promote the starting image into an array.
+        const needsRef = /at least one reference|reference is required|image_references|reference_image_urls/i.test(err.message || '');
+        if (needsRef && body.image_url && !body.reference_image_urls && !promotedRefs) {
+          promotedRefs = true;
+          body = { ...body, reference_image_urls: [body.image_url] };
+          delete body.image_url;
+          console.warn('Model requires references — retrying with reference_image_urls');
+          continue;
+        }
+
+        // 2) Unsupported/invalid fields -> strip them and retry. Never strip
+        //    the essentials (model/prompt) or a field we can't remove.
+        const bad = VeniceAPI.unsupportedFields(err.apiError)
+          .filter(f => f in body && f !== 'model' && f !== 'prompt');
+        if (bad.length) {
+          body = { ...body };
+          for (const f of bad) { delete body[f]; stripped.push(f); }
+          console.warn('Dropping unsupported params and retrying:', bad);
+          continue;
+        }
+
+        throw err;
+      }
+    }
+    throw new Error('Unable to submit request after adjusting parameters for this model.');
+  }
+
+  // Shared input validation for queue() and quote() so they never drift.
+  static validateInputs(params) {
+    if (!params || typeof params !== 'object') {
+      throw new Error('Parameters object is required');
+    }
+    if (!params.model) {
+      throw new Error('Model is required');
+    }
+
+    const mode = VeniceAPI.inputMode(params.model, params.modelConstraints || {});
+    const len = (v) => Array.isArray(v) ? v.filter(Boolean).length : (v ? 1 : 0);
+    const hasImage = !!(params.image_url || len(params.reference_image_urls));
+    const hasVideo = !!(params.video_url || len(params.reference_video_urls));
+
+    if (mode === 'reference') {
+      if (!hasImage && !hasVideo) {
+        throw new Error('At least one reference image or video is required for this model');
+      }
+    } else if (mode === 'image') {
+      if (!hasImage) {
+        throw new Error('An image is required for image-to-video models');
+      }
+    } else if (mode === 'video') {
+      if (!hasVideo) {
+        throw new Error('A source video is required for video-to-video models');
+      }
+    } else if (!params.prompt) {
+      throw new Error('Prompt is required for text-to-video models');
+    }
+
+    // reference_audio_urls can never be the only reference input (per API).
+    if (len(params.reference_audio_urls) && !hasImage && !hasVideo) {
+      throw new Error('Reference audio must be paired with a reference image or video — audio-only input is rejected.');
+    }
+
+    if (params.prompt && params.prompt.length > 5000) {
+      throw new Error('Prompt exceeds maximum length of 5000 characters');
+    }
+  }
+
+  // Queue a new video generation request
+  async queue(params) {
+    VeniceAPI.validateInputs(params);
+
+    const { body } = VeniceAPI.buildRequestBody(params);
+    const data = await this._submitHealing('/queue', body);
     console.log('Queue response:', JSON.stringify(data, null, 2));
 
     if (!data.queue_id) {
@@ -234,57 +397,6 @@ class VeniceAPI {
       model: data.model || body.model,
       message: data.message
     };
-  }
-
-  // Queue a new video generation request
-  async queue(params) {
-    // Validate required parameters
-    if (!params || typeof params !== 'object') {
-      throw new Error('Parameters object is required');
-    }
-    if (!params.model) {
-      throw new Error('Model is required');
-    }
-
-    const mode = VeniceAPI.inputMode(params.model, params.modelConstraints || {});
-    const hasImage = !!(params.image_url || (params.reference_image_urls && params.reference_image_urls.length));
-
-    if (mode === 'reference') {
-      if (!hasImage) {
-        throw new Error('At least one reference image is required for this model');
-      }
-    } else if (mode === 'image' || mode === 'video') {
-      if (mode === 'image' && !hasImage) {
-        throw new Error('An image is required for image-to-video models');
-      }
-      if (mode === 'video' && !params.video_url) {
-        throw new Error('A source video is required for video-to-video models');
-      }
-    } else {
-      if (!params.prompt) {
-        throw new Error('Prompt is required for text-to-video models');
-      }
-    }
-    if (params.prompt && params.prompt.length > 5000) {
-      throw new Error('Prompt exceeds maximum length of 5000 characters');
-    }
-
-    const { body } = VeniceAPI.buildRequestBody(params);
-
-    try {
-      return await this._submitQueue(body);
-    } catch (err) {
-      // Some models reject image_url and require reference arrays instead.
-      // Recover automatically by promoting the image into reference_image_urls.
-      const needsRef = /at least one reference|reference_image_urls|reference is required|image_references/i.test(err.message || '');
-      if (needsRef && body.image_url && !body.reference_image_urls) {
-        console.warn('Model requires references — retrying with reference_image_urls');
-        const retry = { ...body, reference_image_urls: [body.image_url] };
-        delete retry.image_url;
-        return await this._submitQueue(retry);
-      }
-      throw err;
-    }
   }
 
   // Retrieve video generation status
@@ -351,33 +463,10 @@ class VeniceAPI {
 
   // Get cost quote for video generation
   async quote(params) {
-    if (!params || !params.model) {
-      throw new Error('Model is required for quote');
-    }
-
-    const mode = VeniceAPI.inputMode(params.model, params.modelConstraints || {});
-    const hasImage = !!(params.image_url || (params.reference_image_urls && params.reference_image_urls.length));
-
-    if (mode === 'reference' && !hasImage) {
-      throw new Error('At least one reference image is required for this model');
-    }
-    if (mode === 'image' && !hasImage) {
-      throw new Error('An image is required for image-to-video models');
-    }
-    if (mode === 'video' && !params.video_url) {
-      throw new Error('A source video is required for video-to-video models');
-    }
-    if (mode === 'text' && !params.prompt) {
-      throw new Error('Prompt is required for text-to-video models');
-    }
+    VeniceAPI.validateInputs(params);
 
     const { body } = VeniceAPI.buildRequestBody(params);
-    console.log('Quote request body:', JSON.stringify(body, null, 2));
-
-    const data = await this.request('/quote', {
-      method: 'POST',
-      body: JSON.stringify(body)
-    });
+    const data = await this._submitHealing('/quote', body);
 
     return {
       estimated_cost: data.quote || data.estimated_cost,
