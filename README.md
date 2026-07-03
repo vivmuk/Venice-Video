@@ -4,11 +4,40 @@ A clean, Swiss-designed interface for generating videos using the Venice AI API.
 
 ## Features
 
-- **Input Tab**: Configure all parameters for video generation
-- **Processing Tab**: Monitor the status of video generation
-- **Video Display Tab**: View and download generated videos
-- **Swiss Design**: Clean typography, ample whitespace, and minimal color palette
-- **Responsive Layout**: Works on desktop and mobile devices
+- **Model-aware parameters**: The request sent to Venice is built per-model from the
+  model's own `constraints`, so only supported parameters are included (duration,
+  aspect ratio, resolution, audio) and invalid values are coerced to a valid option.
+- **Text-, Image- and Reference-to-Video**: Reference-to-video models are supported —
+  the uploaded image is sent as `reference_image_urls` instead of `image_url`.
+- **Advanced options**: Negative prompt, seed (with randomizer), audio toggle, and
+  auto-delete-on-completion are all wired through to the API.
+- **Automatic reference fallback**: If a model rejects `image_url` and requires a
+  reference array, the app automatically retries with `reference_image_urls`.
+- **Swiss Design**: Clean typography, ample whitespace, and a minimal color palette.
+- **Responsive Layout**: Works on desktop and mobile devices.
+
+## Supported request parameters
+
+The app builds `POST /video/queue` (and `/video/quote`) bodies from the following
+fields, matching the current Venice video API. Each is only included when the
+selected model supports it:
+
+| Parameter | Type | Notes |
+|-----------|------|-------|
+| `model` | string | Required. Full model id, e.g. `veo3.1-fast-text-to-video`. |
+| `prompt` | string | Required for text-to-video; also used as the motion prompt for image/reference models. |
+| `negative_prompt` | string | Optional. What to avoid. |
+| `duration` | string | Sent as `"5s"`, `"8s"`, … and validated against the model's `durations`. |
+| `aspect_ratio` | string | Only sent when the model advertises `aspect_ratios` (e.g. `16:9`, `9:16`, `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `21:9`). |
+| `resolution` | string | Only sent when supported (`480p`/`720p`/`1080p`/`2160p`). |
+| `seed` | integer | Optional. Reuse for reproducible results. |
+| `audio` | boolean | Only sent when the model supports audio generation. |
+| `image_url` | string (URL) | Image-to-video starting frame. |
+| `reference_image_urls` | string[] | Reference-to-video character/scene references (up to 9). |
+
+> The app reads the live model list from `GET /models?type=video` and derives each
+> model's input mode (text / image / reference) from its id and `model_type`, so new
+> models added by Venice are picked up automatically.
 
 ## Usage
 
@@ -164,7 +193,22 @@ A clean, Swiss-designed interface for generating videos using the Venice AI API.
   "model": "veo3.1-fast-image-to-video",
   "prompt": "Add motion to this landscape photo",
   "image_url": "https://example.com/landscape.jpg",
-  "duration": 8,
+  "duration": "8s",
+  "aspect_ratio": "16:9"
+}
+```
+
+#### Reference-to-Video
+
+Reference-to-video models use character/scene references instead of a single
+starting frame:
+
+```json
+{
+  "model": "kling-o3-pro-reference-to-video",
+  "prompt": "@Image1 walking through a neon city, cinematic tracking shot",
+  "reference_image_urls": ["https://example.com/character.jpg"],
+  "duration": "8s",
   "aspect_ratio": "16:9"
 }
 ```

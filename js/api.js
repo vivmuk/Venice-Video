@@ -127,94 +127,164 @@ class VeniceAPI {
     throw new Error(errorMessages[response.status] || `HTTP Error: ${response.status}`);
   }
 
-  // Queue a new video generation request
-  async queue(params) {
-    // Validate required parameters
-    if (!params || typeof params !== 'object') {
-      throw new Error('Parameters object is required');
+  // Determine how a model consumes visual input based on its id/constraints.
+  // Returns one of: 'text', 'image' (single starting frame via image_url),
+  // 'reference' (character/scene refs via reference_image_urls).
+  static inputMode(modelId, constraints = {}) {
+    const id = (modelId || '').toLowerCase();
+    const type = (constraints.model_type || '').toLowerCase();
+    if (id.includes('reference-to-video') || type === 'reference-to-video') return 'reference';
+    if (id.includes('image-to-video') || type === 'image-to-video') return 'image';
+    if (id.includes('video-to-video') || type === 'video-to-video') return 'video';
+    return 'text';
+  }
+
+  // Build a Venice /video/queue|quote request body that only contains the
+  // parameters the selected model actually supports. Centralised so queue()
+  // and quote() stay in sync. See Venice API: POST /video/queue.
+  static buildRequestBody(params) {
+    const c = params.modelConstraints || {};
+    const mode = VeniceAPI.inputMode(params.model, c);
+    const body = { model: params.model };
+
+    if (params.prompt) body.prompt = params.prompt.trim();
+    if (params.negative_prompt && params.negative_prompt.trim()) {
+      body.negative_prompt = params.negative_prompt.trim();
     }
 
-    if (!params.model) {
-      throw new Error('Model is required');
-    }
-
-    // For text-to-video, prompt is required
-    // For image-to-video, image_url is required
-    const isImageToVideo = params.model.includes('image-to-video');
-
-    if (isImageToVideo) {
-      if (!params.image_url) {
-        throw new Error('Image URL is required for image-to-video models');
-      }
-    } else {
-      if (!params.prompt) {
-        throw new Error('Prompt is required for text-to-video models');
-      }
-      if (params.prompt.length > 5000) {
-        throw new Error('Prompt exceeds maximum length of 5000 characters');
-      }
-    }
-
-    // Build request body
-    const body = {
-      model: params.model
-    };
-
-    if (params.prompt) body.prompt = params.prompt;
-    if (params.image_url) body.image_url = params.image_url;
-    
-    // Duration must be a string like "5s" or "10s", not a number
-    // Only include if provided and valid
-    if (params.duration !== undefined && params.duration !== null) {
-      // If it's already a string with 's', use it; otherwise convert number to string
+    // Duration must be a string like "5s" (not a number). Validate against
+    // the model's advertised durations when we know them.
+    if (params.duration !== undefined && params.duration !== null && params.duration !== '') {
+      let dur;
       if (typeof params.duration === 'string' && params.duration.endsWith('s')) {
-        body.duration = params.duration;
+        dur = params.duration;
       } else {
-        const durationNum = parseInt(params.duration);
-        if (!isNaN(durationNum)) {
-          body.duration = `${durationNum}s`;
-        }
+        const n = parseInt(params.duration);
+        if (!isNaN(n)) dur = `${n}s`;
+      }
+      if (dur) {
+        const allowed = (c.durations || []).map(d =>
+          typeof d === 'string' ? (d.endsWith('s') ? d : `${d}s`) : `${d}s`);
+        body.duration = (allowed.length && !allowed.includes(dur)) ? allowed[0] : dur;
       }
     }
-    
-    // Aspect ratio - ONLY include if model supports it (has aspect_ratios in constraints)
-    // If aspect_ratios array is empty, the model does NOT support aspect_ratio
-    if (params.modelConstraints && params.modelConstraints.aspect_ratios && params.modelConstraints.aspect_ratios.length > 0) {
-      // Model supports aspect ratios
-      if (params.aspect_ratio && params.modelConstraints.aspect_ratios.includes(params.aspect_ratio)) {
-        body.aspect_ratio = params.aspect_ratio;
-      } else {
-        // Use first available aspect ratio from model constraints
-        body.aspect_ratio = params.modelConstraints.aspect_ratios[0];
-      }
+
+    // Aspect ratio - only when the model advertises support.
+    if (Array.isArray(c.aspect_ratios) && c.aspect_ratios.length > 0) {
+      body.aspect_ratio = c.aspect_ratios.includes(params.aspect_ratio)
+        ? params.aspect_ratio
+        : c.aspect_ratios[0];
     }
-    // If model doesn't support aspect_ratio (empty array or undefined), don't include it at all
-    
-    // Resolution - only include if model supports it and it's provided
+
+    // Resolution - only when supported (or when the model doesn't restrict it).
     if (params.resolution && typeof params.resolution === 'string' && params.resolution.trim()) {
-      body.resolution = params.resolution.trim();
+      const res = params.resolution.trim();
+      if (Array.isArray(c.resolutions) && c.resolutions.length > 0) {
+        body.resolution = c.resolutions.includes(res) ? res : c.resolutions[0];
+      } else {
+        body.resolution = res;
+      }
     }
 
-    // Log request body for debugging
-    console.log('Queue request body:', JSON.stringify(body, null, 2));
+    // Audio - only when the model can generate it and the user opted in.
+    if (c.audio && typeof params.audio === 'boolean') {
+      body.audio = params.audio;
+    }
 
+    // Seed - optional deterministic seed.
+    if (params.seed !== undefined && params.seed !== null && params.seed !== '') {
+      const s = parseInt(params.seed);
+      if (!isNaN(s)) body.seed = s;
+    }
+
+    // Visual inputs, routed by the model's input mode.
+    const refs = (params.reference_image_urls || []).filter(Boolean);
+    if (mode === 'reference') {
+      // Reference-to-video: characters/scenes via reference_image_urls (max 9).
+      const all = refs.slice();
+      if (params.image_url && !all.includes(params.image_url)) all.unshift(params.image_url);
+      if (all.length) body.reference_image_urls = all.slice(0, 9);
+    } else if (mode === 'image') {
+      // Image-to-video: single starting frame. Pass any extra refs through too.
+      if (params.image_url) body.image_url = params.image_url;
+      if (params.end_image_url) body.end_image_url = params.end_image_url;
+      if (refs.length) body.reference_image_urls = refs.slice(0, 9);
+    } else if (mode === 'video') {
+      if (params.video_url) body.video_url = params.video_url;
+    }
+
+    return { body, mode };
+  }
+
+  // Submit a request body to a queue-shaped endpoint and normalise the response.
+  async _submitQueue(body) {
+    console.log('Queue request body:', JSON.stringify(body, null, 2));
     const data = await this.request('/queue', {
       method: 'POST',
       body: JSON.stringify(body)
     });
-
     console.log('Queue response:', JSON.stringify(data, null, 2));
 
     if (!data.queue_id) {
       console.error('Queue response missing queue_id:', data);
       throw new Error('Invalid queue response: queue_id not found in response');
     }
-
     return {
       queue_id: data.queue_id,
       model: data.model || body.model,
       message: data.message
     };
+  }
+
+  // Queue a new video generation request
+  async queue(params) {
+    // Validate required parameters
+    if (!params || typeof params !== 'object') {
+      throw new Error('Parameters object is required');
+    }
+    if (!params.model) {
+      throw new Error('Model is required');
+    }
+
+    const mode = VeniceAPI.inputMode(params.model, params.modelConstraints || {});
+    const hasImage = !!(params.image_url || (params.reference_image_urls && params.reference_image_urls.length));
+
+    if (mode === 'reference') {
+      if (!hasImage) {
+        throw new Error('At least one reference image is required for this model');
+      }
+    } else if (mode === 'image' || mode === 'video') {
+      if (mode === 'image' && !hasImage) {
+        throw new Error('An image is required for image-to-video models');
+      }
+      if (mode === 'video' && !params.video_url) {
+        throw new Error('A source video is required for video-to-video models');
+      }
+    } else {
+      if (!params.prompt) {
+        throw new Error('Prompt is required for text-to-video models');
+      }
+    }
+    if (params.prompt && params.prompt.length > 5000) {
+      throw new Error('Prompt exceeds maximum length of 5000 characters');
+    }
+
+    const { body } = VeniceAPI.buildRequestBody(params);
+
+    try {
+      return await this._submitQueue(body);
+    } catch (err) {
+      // Some models reject image_url and require reference arrays instead.
+      // Recover automatically by promoting the image into reference_image_urls.
+      const needsRef = /at least one reference|reference_image_urls|reference is required|image_references/i.test(err.message || '');
+      if (needsRef && body.image_url && !body.reference_image_urls) {
+        console.warn('Model requires references — retrying with reference_image_urls');
+        const retry = { ...body, reference_image_urls: [body.image_url] };
+        delete retry.image_url;
+        return await this._submitQueue(retry);
+      }
+      throw err;
+    }
   }
 
   // Retrieve video generation status
@@ -285,64 +355,23 @@ class VeniceAPI {
       throw new Error('Model is required for quote');
     }
 
-    // For text-to-video, prompt is required
-    // For image-to-video, image_url is required
-    const isImageToVideo = params.model.includes('image-to-video');
+    const mode = VeniceAPI.inputMode(params.model, params.modelConstraints || {});
+    const hasImage = !!(params.image_url || (params.reference_image_urls && params.reference_image_urls.length));
 
-    if (isImageToVideo) {
-      if (!params.image_url) {
-        throw new Error('Image URL is required for image-to-video models');
-      }
-      // Prompt is also required for image-to-video models
-      if (!params.prompt) {
-        throw new Error('Prompt is required for image-to-video models (describes how the image should move)');
-      }
-    } else {
-      if (!params.prompt) {
-        throw new Error('Prompt is required for text-to-video models');
-      }
+    if (mode === 'reference' && !hasImage) {
+      throw new Error('At least one reference image is required for this model');
+    }
+    if (mode === 'image' && !hasImage) {
+      throw new Error('An image is required for image-to-video models');
+    }
+    if (mode === 'video' && !params.video_url) {
+      throw new Error('A source video is required for video-to-video models');
+    }
+    if (mode === 'text' && !params.prompt) {
+      throw new Error('Prompt is required for text-to-video models');
     }
 
-    const body = {
-      model: params.model
-    };
-
-    if (params.prompt) body.prompt = params.prompt;
-    if (params.image_url) body.image_url = params.image_url;
-    
-    // Duration must be a string like "5s" or "10s", not a number
-    // Only include if provided and valid
-    if (params.duration !== undefined && params.duration !== null) {
-      // If it's already a string with 's', use it; otherwise convert number to string
-      if (typeof params.duration === 'string' && params.duration.endsWith('s')) {
-        body.duration = params.duration;
-      } else {
-        const durationNum = parseInt(params.duration);
-        if (!isNaN(durationNum)) {
-          body.duration = `${durationNum}s`;
-        }
-      }
-    }
-    
-    // Aspect ratio - ONLY include if model supports it (has aspect_ratios in constraints)
-    // If aspect_ratios array is empty, the model does NOT support aspect_ratio
-    if (params.modelConstraints && params.modelConstraints.aspect_ratios && params.modelConstraints.aspect_ratios.length > 0) {
-      // Model supports aspect ratios
-      if (params.aspect_ratio && params.modelConstraints.aspect_ratios.includes(params.aspect_ratio)) {
-        body.aspect_ratio = params.aspect_ratio;
-      } else {
-        // Use first available aspect ratio from model constraints
-        body.aspect_ratio = params.modelConstraints.aspect_ratios[0];
-      }
-    }
-    // If model doesn't support aspect_ratio (empty array or undefined), don't include it at all
-    
-    // Resolution - only include if model supports it and it's provided
-    if (params.resolution && typeof params.resolution === 'string' && params.resolution.trim()) {
-      body.resolution = params.resolution.trim();
-    }
-
-    // Log request body for debugging
+    const { body } = VeniceAPI.buildRequestBody(params);
     console.log('Quote request body:', JSON.stringify(body, null, 2));
 
     const data = await this.request('/quote', {

@@ -90,8 +90,12 @@
 
                         <!-- Image-to-Video Input -->
                         <div id="image-input-section" class="hidden">
+                            <div id="reference-hint" class="reference-hint hidden">
+                                <svg viewBox="0 0 24 24" width="16" height="16"><path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                <span>This is a reference-to-video model. Your image is used as a character/scene reference (sent as <code>reference_image_urls</code>).</span>
+                            </div>
                             <div class="form-section">
-                                <label class="form-label">Source Image</label>
+                                <label class="form-label" id="image-label">Source Image</label>
                                 <div id="upload-zone" class="upload-zone" ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" onclick="document.getElementById('image-upload').click()">
                                     <input type="file" id="image-upload" accept="image/*" style="display: none;" onchange="handleImageUpload(event)">
                                     <div id="upload-content">
@@ -128,13 +132,10 @@
                                 </div>
                             </div>
 
-                            <div class="form-section">
+                            <div class="form-section" id="aspect-section">
                                 <label class="form-label">Aspect Ratio</label>
-                                <div class="param-pills">
-                                    <button type="button" class="param-pill selected" data-ratio="16:9">16:9</button>
-                                    <button type="button" class="param-pill" data-ratio="9:16">9:16</button>
-                                    <button type="button" class="param-pill" data-ratio="1:1">1:1</button>
-                                    <button type="button" class="param-pill" data-ratio="4:3">4:3</button>
+                                <div id="aspect-pills" class="param-pills">
+                                    <!-- Populated by JS based on model constraints -->
                                 </div>
                             </div>
 
@@ -168,6 +169,30 @@
                                 <span class="toggle-slider"></span>
                             </label>
                         </div>
+
+                        <!-- Advanced options -->
+                        <details class="advanced-options">
+                            <summary class="advanced-summary">
+                                <svg viewBox="0 0 24 24" width="16" height="16"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
+                                Advanced options
+                            </summary>
+                            <div class="advanced-body">
+                                <div class="form-section">
+                                    <label class="form-label" for="negative-prompt">Negative Prompt <span class="form-label-hint">(what to avoid)</span></label>
+                                    <textarea id="negative-prompt" class="form-textarea" placeholder="blurry, low quality, distorted, watermark..." rows="2"></textarea>
+                                </div>
+                                <div class="form-section">
+                                    <label class="form-label" for="seed-input">Seed <span class="form-label-hint">(optional — reuse for reproducible results)</span></label>
+                                    <div class="seed-row">
+                                        <input type="number" id="seed-input" class="form-input" placeholder="Random" min="0" step="1">
+                                        <button type="button" class="btn btn-secondary seed-btn" onclick="randomizeSeed()" title="Generate a random seed">
+                                            <svg viewBox="0 0 24 24" width="16" height="16"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                                            Random
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </details>
                     </div>
                 </div>
 
