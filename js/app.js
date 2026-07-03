@@ -454,7 +454,6 @@ async function processImageFile(file) {
     document.getElementById('upload-preview').style.display = 'block';
     document.getElementById('preview-image').src = dataUrl;
     document.getElementById('upload-zone').classList.add('has-image');
-    document.getElementById('image-url').value = '';
   };
   reader.readAsDataURL(file);
 
@@ -525,6 +524,7 @@ async function uploadImageToHosting(file) {
 function removeImage(e) {
   e.stopPropagation();
   appState.uploadedImage = null;
+  appState.uploadedImageUrl = null;
 
   document.getElementById('upload-content').style.display = 'block';
   document.getElementById('upload-preview').style.display = 'none';
@@ -550,9 +550,8 @@ function validateForm() {
       errors['prompt'] = 'Prompt must be 5000 characters or less';
     }
   } else {
-    const imageUrl = document.getElementById('image-url').value.trim();
-    if (!appState.uploadedImageUrl && !imageUrl) {
-      errors['image-url'] = 'Please upload an image or provide a URL';
+    if (!appState.uploadedImageUrl) {
+      errors['image-url'] = 'Please upload an image';
     }
     // Also check for motion prompt (required for image-to-video)
     const motionPrompt = document.getElementById('motion-prompt').value.trim();
@@ -625,7 +624,7 @@ function buildGenerationParams() {
   if (appState.mode === 'text-to-video') {
     params.prompt = document.getElementById('prompt').value.trim();
   } else {
-    const imageUrl = document.getElementById('image-url').value.trim() || appState.uploadedImageUrl || '';
+    const imageUrl = appState.uploadedImageUrl || '';
     if (model.requiresReference) {
       params.reference_image_urls = imageUrl ? [imageUrl] : [];
     } else {
