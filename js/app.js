@@ -35,9 +35,6 @@ async function initializeApp() {
   // Setup prompt counter
   setupPromptCounter();
 
-  // Setup aspect ratio pills
-  setupAspectRatioPills();
-
   // Setup global error handlers
   window.addEventListener('error', (e) => {
     console.error('Global error:', e.error);
@@ -118,6 +115,11 @@ async function loadModels(token) {
       // Audio support
       const audio = constraints.audio || false;
       
+      // Determine how the model consumes visual input (text / image / reference / video).
+      const inputMode = (typeof VeniceAPI !== 'undefined' && VeniceAPI.inputMode)
+        ? VeniceAPI.inputMode(modelId, constraints)
+        : (modelType || 'text').replace('-to-video', '');
+
       const modelData = {
         id: model.id,
         name: name,
@@ -127,15 +129,19 @@ async function loadModels(token) {
         aspectRatios: aspectRatios,
         audio: audio,
         constraints: constraints,
+        inputMode: inputMode,
+        requiresReference: inputMode === 'reference',
         offline: model.model_spec?.offline || false
       };
-      
-      // Categorize model by model_type from API
-      if (modelType === 'image-to-video') {
-        MODELS['image-to-video'].push(modelData);
-      } else if (modelType === 'text-to-video') {
+
+      // Categorize model. Text-to-video lives in the Text tab; image-to-video and
+      // reference-to-video both accept image input and live in the Image tab.
+      if (inputMode === 'text' || modelType === 'text-to-video') {
         MODELS['text-to-video'].push(modelData);
+      } else if (inputMode === 'image' || inputMode === 'reference') {
+        MODELS['image-to-video'].push(modelData);
       }
+      // Other types (video-to-video, upscale) are not surfaced in this UI yet.
     });
     
     // Log model counts for debugging
@@ -265,38 +271,52 @@ function selectModel(modelId) {
   renderResolutionPills(resolutions);
 
   // Update aspect ratio pills based on model constraints
-  updateAspectRatioPills(model.aspectRatios || []);
+  renderAspectRatioPills(model.aspectRatios || []);
 
   // Show/hide audio toggle
   document.getElementById('audio-toggle').classList.toggle('hidden', !model.audio);
+
+  // Reference-to-video models use the image as a character/scene reference.
+  const refHint = document.getElementById('reference-hint');
+  if (refHint) refHint.classList.toggle('hidden', !model.requiresReference);
+  const imgLabel = document.getElementById('image-label');
+  if (imgLabel) imgLabel.textContent = model.requiresReference ? 'Reference Image' : 'Source Image';
 
   // Update selected model info
   updateSelectedModelInfo(model);
 }
 
-// Update aspect ratio pills based on model constraints
-function updateAspectRatioPills(availableRatios) {
-  const allRatios = ['16:9', '9:16', '1:1'];
-  const ratioPills = document.querySelectorAll('[data-ratio]');
-  
-  ratioPills.forEach(pill => {
-    const ratio = pill.dataset.ratio;
-    // If model has specific aspect ratios, only show those
-    // If empty array, show all (model doesn't restrict)
-    if (availableRatios.length > 0 && !availableRatios.includes(ratio)) {
-      pill.style.display = 'none';
-    } else {
-      pill.style.display = 'inline-block';
-    }
-  });
-  
-  // If model requires specific aspect ratios and current selection isn't valid, change it
-  if (availableRatios.length > 0 && !availableRatios.includes(appState.selectedAspectRatio)) {
-    appState.selectedAspectRatio = availableRatios[0];
-    ratioPills.forEach(p => {
-      p.classList.toggle('selected', p.dataset.ratio === appState.selectedAspectRatio);
-    });
+// Render aspect ratio pills from the model's advertised ratios.
+// Hides the control entirely for models that don't accept an aspect ratio.
+function renderAspectRatioPills(ratios) {
+  const container = document.getElementById('aspect-pills');
+  const section = document.getElementById('aspect-section');
+  if (!container) return;
+
+  if (!ratios || ratios.length === 0) {
+    if (section) section.style.display = 'none';
+    appState.selectedAspectRatio = null;
+    container.innerHTML = '';
+    return;
   }
+
+  if (section) section.style.display = '';
+  const selected = ratios.includes(appState.selectedAspectRatio)
+    ? appState.selectedAspectRatio
+    : (ratios.includes('16:9') ? '16:9' : ratios[0]);
+  appState.selectedAspectRatio = selected;
+
+  container.innerHTML = ratios.map(r => `
+    <button type="button" class="param-pill ${r === selected ? 'selected' : ''}" data-ratio="${r}" onclick="selectAspectRatio('${r}')">${r}</button>
+  `).join('');
+}
+
+// Select Aspect Ratio
+function selectAspectRatio(ratio) {
+  appState.selectedAspectRatio = ratio;
+  document.querySelectorAll('#aspect-pills .param-pill').forEach(pill => {
+    pill.classList.toggle('selected', pill.dataset.ratio === ratio);
+  });
 }
 
 // Render Duration Pills
@@ -343,16 +363,10 @@ function selectResolution(resolution) {
   });
 }
 
-// Setup Aspect Ratio Pills
-function setupAspectRatioPills() {
-  document.querySelectorAll('[data-ratio]').forEach(pill => {
-    pill.addEventListener('click', () => {
-      appState.selectedAspectRatio = pill.dataset.ratio;
-      document.querySelectorAll('[data-ratio]').forEach(p => {
-        p.classList.toggle('selected', p.dataset.ratio === pill.dataset.ratio);
-      });
-    });
-  });
+// Fill the seed field with a random value.
+function randomizeSeed() {
+  const seed = document.getElementById('seed-input');
+  if (seed) seed.value = Math.floor(Math.random() * 2147483647);
 }
 
 // Update Selected Model Info
@@ -574,6 +588,55 @@ function validateForm() {
   return Object.keys(errors).length === 0;
 }
 
+// Collect all generation parameters from the form + selected model.
+// Shared by Generate and Estimate so the two never drift apart.
+function buildGenerationParams() {
+  const model = appState.selectedModel;
+  const params = {
+    model: model.id,
+    modelConstraints: model.constraints // used for per-model validation/filtering
+  };
+
+  // Aspect ratio - only when the model supports it.
+  const ratios = model.aspectRatios || [];
+  if (ratios.length > 0) {
+    params.aspect_ratio = ratios.includes(appState.selectedAspectRatio)
+      ? appState.selectedAspectRatio
+      : ratios[0];
+  }
+
+  // Duration / resolution (validated again in the API layer).
+  if (appState.selectedDuration) params.duration = appState.selectedDuration;
+  if (appState.selectedResolution) params.resolution = appState.selectedResolution;
+
+  // Audio - only when the model can generate it.
+  if (model.audio) {
+    const audioEl = document.getElementById('audio-checkbox');
+    params.audio = !!(audioEl && audioEl.checked);
+  }
+
+  // Advanced options.
+  const neg = document.getElementById('negative-prompt');
+  if (neg && neg.value.trim()) params.negative_prompt = neg.value.trim();
+  const seed = document.getElementById('seed-input');
+  if (seed && seed.value.trim() !== '') params.seed = seed.value.trim();
+
+  // Prompt + visual input.
+  if (appState.mode === 'text-to-video') {
+    params.prompt = document.getElementById('prompt').value.trim();
+  } else {
+    const imageUrl = document.getElementById('image-url').value.trim() || appState.uploadedImageUrl || '';
+    if (model.requiresReference) {
+      params.reference_image_urls = imageUrl ? [imageUrl] : [];
+    } else {
+      params.image_url = imageUrl;
+    }
+    params.prompt = document.getElementById('motion-prompt').value.trim();
+  }
+
+  return params;
+}
+
 // Generate Video
 async function handleGenerate() {
   if (!validateForm()) return;
@@ -586,73 +649,7 @@ async function handleGenerate() {
     generateBtn.innerHTML = '<span class="spinner"></span> Submitting...';
     showLoading('Submitting video generation request...');
 
-    // Build parameters - start with required fields
-    const params = {
-      model: appState.selectedModel.id,
-      modelConstraints: appState.selectedModel.constraints // Pass constraints for validation
-    };
-
-    // Add aspect ratio only if model supports it
-    const modelAspectRatios = appState.selectedModel.aspectRatios || [];
-    if (modelAspectRatios.length > 0) {
-      // Model supports aspect ratios - use selected one or first available
-      if (modelAspectRatios.includes(appState.selectedAspectRatio)) {
-        params.aspect_ratio = appState.selectedAspectRatio;
-      } else {
-        params.aspect_ratio = modelAspectRatios[0];
-      }
-    }
-    // If model doesn't support aspect_ratio (empty array), don't include it
-
-    // Add duration if valid (will be converted to "5s" format in API)
-    if (appState.selectedDuration) {
-      params.duration = appState.selectedDuration;
-    }
-
-    // Add prompt for text-to-video
-    if (appState.mode === 'text-to-video') {
-      const prompt = document.getElementById('prompt').value.trim();
-      if (!prompt) {
-        showToast('Please enter a prompt', 'error');
-        generateBtn.disabled = false;
-        generateBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> Generate Video';
-        hideLoading();
-        return;
-      }
-      params.prompt = prompt;
-    } else {
-      // For image-to-video, we need to handle the image
-      const imageUrl = document.getElementById('image-url').value.trim();
-      if (imageUrl) {
-        params.image_url = imageUrl;
-      } else if (appState.uploadedImageUrl) {
-        // Use the uploaded image URL (from hosting service)
-        params.image_url = appState.uploadedImageUrl;
-      } else {
-        // No image provided
-        hideLoading();
-        generateBtn.disabled = false;
-        generateBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> Generate Video';
-        showToast('Please upload an image or provide an image URL', 'error');
-        return;
-      }
-
-      // Prompt is REQUIRED for image-to-video models too
-      const motionPrompt = document.getElementById('motion-prompt').value.trim();
-      if (!motionPrompt) {
-        showToast('Please enter a motion prompt (describes how the image should move)', 'error');
-        generateBtn.disabled = false;
-        generateBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> Generate Video';
-        hideLoading();
-        return;
-      }
-      params.prompt = motionPrompt;
-    }
-
-    // Add resolution if selected (optional parameter)
-    if (appState.selectedResolution) {
-      params.resolution = appState.selectedResolution;
-    }
+    const params = buildGenerationParams();
 
     // Create API instance with custom key if available
     const customKey = getApiKey();
@@ -682,8 +679,11 @@ async function handleGenerate() {
     // Wait a few seconds before first poll to give the queue time to process
     await new Promise(resolve => setTimeout(resolve, 3000));
 
-    // Start polling - pass model ID as well since API requires it
-    pollForCompletion(api, response.queue_id, response.model || appState.selectedModel?.id);
+    // Start polling - pass model ID as well since API requires it.
+    // Honor the auto-delete toggle so storage is cleaned up on completion.
+    const autoDeleteEl = document.getElementById('auto-delete-checkbox');
+    const autoDelete = !!(autoDeleteEl && autoDeleteEl.checked);
+    pollForCompletion(api, response.queue_id, response.model || appState.selectedModel?.id, autoDelete);
 
   } catch (error) {
     console.error('Generation error:', error);
@@ -695,7 +695,7 @@ async function handleGenerate() {
 }
 
 // Poll for Completion
-async function pollForCompletion(api, queueId, modelId = null) {
+async function pollForCompletion(api, queueId, modelId = null, deleteOnCompletion = false) {
   const pollInterval = 10000; // 10 seconds
   const maxAttempts = 120; // 20 minutes max
 
@@ -710,7 +710,7 @@ async function pollForCompletion(api, queueId, modelId = null) {
 
     try {
       console.log(`Polling attempt ${attempt + 1} for queue_id: ${queueId}, model: ${modelId}`);
-      const status = await api.retrieve(queueId, modelId);
+      const status = await api.retrieve(queueId, modelId, deleteOnCompletion);
 
       // Update progress UI
       document.getElementById('progress-fill').style.width = `${status.progress}%`;
@@ -804,62 +804,7 @@ async function handleEstimate() {
     estimateBtn.disabled = true;
     estimateBtn.innerHTML = '<span class="spinner"></span> Calculating...';
 
-    // Build parameters - start with required fields
-    const params = {
-      model: appState.selectedModel.id,
-      modelConstraints: appState.selectedModel.constraints // Pass constraints for validation
-    };
-
-    // Add aspect ratio ONLY if model supports it (has aspect_ratios in constraints)
-    const modelAspectRatios = appState.selectedModel.aspectRatios || [];
-    if (modelAspectRatios.length > 0) {
-      // Model supports aspect ratios - use selected one or first available
-      if (modelAspectRatios.includes(appState.selectedAspectRatio)) {
-        params.aspect_ratio = appState.selectedAspectRatio;
-      } else {
-        params.aspect_ratio = modelAspectRatios[0];
-      }
-    }
-    // If model doesn't support aspect_ratio (empty array), don't include it at all
-
-    // Add duration if valid (will be converted to "5s" format in API)
-    if (appState.selectedDuration) {
-      params.duration = appState.selectedDuration;
-    }
-
-    if (appState.mode === 'text-to-video') {
-      const prompt = document.getElementById('prompt').value.trim();
-      if (!prompt) {
-        showToast('Please enter a prompt', 'error');
-        estimateBtn.disabled = false;
-        estimateBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg> Estimate Cost';
-        return;
-      }
-      params.prompt = prompt;
-    } else {
-      // For image-to-video
-      const imageUrl = document.getElementById('image-url').value.trim();
-      if (imageUrl) {
-        params.image_url = imageUrl;
-      } else if (appState.uploadedImageUrl) {
-        // Use the uploaded image URL (from hosting service)
-        params.image_url = appState.uploadedImageUrl;
-      } else {
-        showToast('Please upload an image or provide an image URL', 'error');
-        estimateBtn.disabled = false;
-        estimateBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg> Estimate Cost';
-        return;
-      }
-      const motionPrompt = document.getElementById('motion-prompt').value.trim();
-      if (motionPrompt) {
-        params.prompt = motionPrompt;
-      }
-    }
-
-    // Add resolution if selected (optional parameter)
-    if (appState.selectedResolution) {
-      params.resolution = appState.selectedResolution;
-    }
+    const params = buildGenerationParams();
 
     // Create API instance with custom key if available
     const customKey = getApiKey();
@@ -1115,6 +1060,8 @@ window.switchMode = switchMode;
 window.selectModel = selectModel;
 window.selectDuration = selectDuration;
 window.selectResolution = selectResolution;
+window.selectAspectRatio = selectAspectRatio;
+window.randomizeSeed = randomizeSeed;
 window.handleDragOver = handleDragOver;
 window.handleDragLeave = handleDragLeave;
 window.handleDrop = handleDrop;

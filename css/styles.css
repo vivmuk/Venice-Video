@@ -1129,3 +1129,78 @@ main {
     gap: var(--space-sm);
   }
 }
+
+/* ===== Reference-to-video hint ===== */
+.reference-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  margin-bottom: var(--space-md);
+  background: var(--bg-accent);
+  border: 1px solid var(--border-light);
+  border-left: 3px solid var(--accent-secondary);
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+.reference-hint svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  stroke: var(--accent-secondary);
+  fill: none;
+  stroke-width: 2;
+}
+.reference-hint code {
+  background: var(--bg-secondary);
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+}
+
+/* ===== Advanced options (collapsible) ===== */
+.advanced-options {
+  margin-top: var(--space-md);
+  border-top: 1px solid var(--border-light);
+  padding-top: var(--space-md);
+}
+.advanced-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  list-style: none;
+  user-select: none;
+}
+.advanced-summary::-webkit-details-marker { display: none; }
+.advanced-summary svg {
+  stroke: var(--accent-primary);
+  fill: none;
+  stroke-width: 2;
+  transition: transform 0.2s ease;
+}
+.advanced-options[open] .advanced-summary svg { transform: rotate(45deg); }
+.advanced-body { margin-top: var(--space-md); }
+
+/* ===== Seed input row ===== */
+.seed-row {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: stretch;
+}
+.seed-row .form-input { flex: 1; }
+.seed-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.seed-btn svg {
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+}
