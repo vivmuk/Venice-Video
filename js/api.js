@@ -161,17 +161,15 @@ class VeniceAPI {
     // the model's advertised durations when we know them.
     if (params.duration !== undefined && params.duration !== null && params.duration !== '') {
       let dur;
-      if (typeof params.duration === 'string') {
-        if (params.duration === 'auto' || params.duration === 'Auto') {
-          // 🆕 V2V edit models advertise `durations: ['Auto']`; preserve the
-          //    literal 'auto' (lowercase) so the API returns source-duration.
-          dur = 'auto';
-        } else if (params.duration.endsWith('s')) {
-          dur = params.duration;
-        } else {
-          const n = parseInt(params.duration);
-          if (!isNaN(n)) dur = `${n}s`;
-        }
+      const d = String(params.duration);
+      if (d === 'auto' || d === 'Auto') {
+        // V2V edit models advertise durations: ['Auto']; preserve literal 'auto'.
+        dur = 'auto';
+      } else if (d.endsWith('s')) {
+        dur = d;
+      } else {
+        const n = parseInt(d);
+        if (!isNaN(n)) dur = `${n}s`;
       }
       if (dur) {
         const allowed = (c.durations || []).map(d => {
