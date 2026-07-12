@@ -986,9 +986,18 @@ function validateForm() {
     } else if (prompt.length > 5000) {
       errors['prompt'] = 'Prompt must be 5000 characters or less';
     }
+  } else if (appState.mode === 'video-to-video') {
+    // Codex P1 fix: V2V mode has its own gate -- it doesn't need an image,
+    // an #motion-prompt, or ref-image urls from the image panel.
+    if (!appState.uploadedVideoUrl) {
+      errors['video-url'] = 'Please upload a source video';
+    }
+    const motionPrompt = document.getElementById('video-motion-prompt').value.trim();
+    if (!motionPrompt) {
+      errors['video-motion-prompt'] = 'Motion prompt is required for video-to-video';
+    }
   } else {
-    // Valid input = an uploaded image, OR reference image/video URLs supplied
-    // in the advanced fields (for reference-to-video models).
+    // image-to-video / reference-to-video
     const refImgEl = document.getElementById('ref-image-urls');
     const refVidEl = document.getElementById('ref-video-urls');
     const hasRefUrls = (refImgEl && refImgEl.value.trim()) || (refVidEl && refVidEl.value.trim());
@@ -997,7 +1006,6 @@ function validateForm() {
         ? 'Please upload an image or add reference image/video URLs'
         : 'Please upload an image';
     }
-    // Also check for motion prompt (required for image-to-video)
     const motionPrompt = document.getElementById('motion-prompt').value.trim();
     if (!motionPrompt) {
       errors['motion-prompt'] = 'Motion prompt is required for image-to-video';
@@ -1098,6 +1106,10 @@ function buildGenerationParams() {
     params.video_url = appState.uploadedVideoUrl || '';
     const el = document.getElementById('video-motion-prompt');
     params.prompt = (el && el.value || '').trim();
+    // Codex fix: forward reference_image_urls to V2V-aware models
+    // (Wan Edit, Grok V2V Private, HappyHorse Edit). Documented in api.js
+    // buildRequestBody V2V branch.
+    if (refImageUrls.length) params.reference_image_urls = refImageUrls;
   } else {
     const uploaded = appState.uploadedImageUrl || '';
     if (model.requiresReference) {

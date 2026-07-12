@@ -140,7 +140,15 @@ class VeniceAPI {
     const type = (constraints.model_type || '').toLowerCase();
     if (id.includes('reference-to-video') || type === 'reference-to-video') return 'reference';
     if (id.includes('image-to-video') || type === 'image-to-video') return 'image';
-    if (id.includes('video-to-video') || type === 'video-to-video') return 'video';
+    // Codex fix: video-input models can be recognized by their constraints even
+    // when the id / model_type doesn't include 'video-to-video'. Runway Gen-4
+    // Aleph and Topaz Video Upscale advertise video_input: true but lack the
+    // substring -- sending them to the Text tab caused wrong-form validation.
+    if (id.includes('video-to-video')
+        || type === 'video-to-video'
+        || constraints.video_input === true) {
+      return 'video';
+    }
     return 'text';
   }
 
