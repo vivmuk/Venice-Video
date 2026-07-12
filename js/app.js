@@ -3,7 +3,8 @@
 // Model Data - loaded from Venice API
 let MODELS = {
   'text-to-video': [],
-  'image-to-video': []
+  'image-to-video': [],
+  'video-to-video': []
 };
 
 // App State
@@ -12,6 +13,12 @@ const appState = {
   selectedModel: null,
   uploadedImage: null,
   uploadedImageUrl: null,
+  uploadedVideoBlob: null,
+  uploadedVideoUrl: null,
+  uploadedVideoDuration: null,
+  uploadedVideoIsVertical: null,
+  uploadedRefs: { image: [], video: [], audio: [] }, // host URLs of uploaded files
+  uploadedRefsFiles: { image: [], video: [], audio: [] }, // parallel blobs (for save-to-library)
   isProcessing: false,
   queueId: null,
   videoUrl: null,
@@ -45,6 +52,9 @@ async function initializeApp() {
     console.error('Unhandled rejection:', e.reason);
     showErrorModal(e.reason?.message || 'An unexpected error occurred');
   });
+
+  // Render the saved-refs gallery from IndexedDB (synchronous, fast)
+  renderSavedRefs().catch(() => {});
 
   // Load models automatically (API token is on server or from custom key)
   // Use custom API key if available
@@ -134,14 +144,17 @@ async function loadModels(token) {
         offline: model.model_spec?.offline || false
       };
 
-      // Categorize model. Text-to-video lives in the Text tab; image-to-video and
-      // reference-to-video both accept image input and live in the Image tab.
+      // Categorize model. 4 buckets now: text-to-video, image-to-video (incl.
+      // reference-to-video), video-to-video (incl. upscale), and an H2V
+      // placeholder if any show up.
       if (inputMode === 'text' || modelType === 'text-to-video') {
         MODELS['text-to-video'].push(modelData);
       } else if (inputMode === 'image' || inputMode === 'reference') {
         MODELS['image-to-video'].push(modelData);
+      } else if (inputMode === 'video') {
+        MODELS['video-to-video'].push(modelData);
       }
-      // Other types (video-to-video, upscale) are not surfaced in this UI yet.
+      // Anything else (future H2V etc.) is not surfaced.
     });
     
     // Log model counts for debugging
@@ -172,6 +185,425 @@ async function loadModels(token) {
   }
 }
 
+// ----- V2V + Reference + Improve handlers -----
+
+async function uploadFile(file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const resp = await fetch('/api/upload', { method: 'POST', body: fd });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.error || 'upload failed (' + resp.status + ')');
+  return data.url;
+}
+
+function handleVideoDragOver(e) { e.preventDefault(); e.stopPropagation(); document.getElementById('video-upload-zone').classList.add('drag-over'); }
+function handleVideoDragLeave(e) { e.preventDefault(); e.stopPropagation(); document.getElementById('video-upload-zone').classList.remove('drag-over'); }
+function handleVideoDrop(e) {
+  e.preventDefault(); e.stopPropagation();
+  document.getElementById('video-upload-zone').classList.remove('drag-over');
+  const dt = new DataTransfer();
+  for (const f of (e.dataTransfer.files || [])) dt.items.add(f);
+  const input = document.getElementById('video-upload');
+  if (!input) return;
+  input.files = dt.files;
+  handleVideoUpload({ target: input });
+}
+
+async function handleVideoUpload(e) {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  if (!file.type || !file.type.startsWith('video/')) {
+    showToast('Please upload a video file (mp4 / mov / webm)', 'error');
+    e.target.value = '';
+    return;
+  }
+  if (file.size > 700 * 1024 * 1024) {
+    showToast('File too large — max 700 MB', 'error');
+    e.target.value = '';
+    return;
+  }
+  showLoading('Uploading video to litterbox.catbox.moe...');
+  try {
+    const url = await uploadFile(file);
+    appState.uploadedVideoBlob = file;
+    appState.uploadedVideoUrl = url;
+    const localUrl = URL.createObjectURL(file);
+    const videoEl = document.getElementById('video-preview');
+    if (videoEl) {
+      videoEl.src = localUrl;
+      document.getElementById('video-upload-content').style.display = 'none';
+      document.getElementById('video-upload-preview').style.display = 'block';
+      videoEl.onloadedmetadata = () => {
+        appState.uploadedVideoDuration = videoEl.duration || 0;
+        appState.uploadedVideoIsVertical = (videoEl.videoHeight || 0) > (videoEl.videoWidth || 0);
+        const meta = document.getElementById('video-meta');
+        if (meta) {
+          const secs = Math.round(videoEl.duration || 0);
+          const dims = (videoEl.videoWidth || 0) + 'x' + (videoEl.videoHeight || 0);
+          meta.textContent = secs + 's . ' + dims + (appState.uploadedVideoIsVertical ? ' . vertical' : '');
+        }
+        hideLoading();
+      };
+      videoEl.onerror = () => hideLoading();
+    } else { hideLoading(); }
+  } catch (err) {
+    hideLoading();
+    showToast('Upload failed: ' + err.message, 'error');
+  }
+}
+
+function removeVideo(e) {
+  e.preventDefault(); e.stopPropagation();
+  appState.uploadedVideoBlob = null;
+  appState.uploadedVideoUrl = null;
+  appState.uploadedVideoDuration = null;
+  appState.uploadedVideoIsVertical = null;
+  const videoEl = document.getElementById('video-preview');
+  if (videoEl) videoEl.src = '';
+  const c = document.getElementById('video-upload-content');
+  const p = document.getElementById('video-upload-preview');
+  const meta = document.getElementById('video-meta');
+  if (c) c.style.display = '';
+  if (p) p.style.display = 'none';
+  if (meta) meta.textContent = '';
+  const inp = document.getElementById('video-upload');
+  if (inp) inp.value = '';
+}
+
+function appendRef(url, targetId, thumbsId, counterId, max, kind, file) {
+  const ta = document.getElementById(targetId);
+  if (!ta) return;
+  const lines = ta.value.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+  if (lines.includes(url)) return;
+  if (lines.length >= max) {
+    showToast('Ref cap (' + max + ') reached - extra drop ignored', 'warning');
+    return;
+  }
+  lines.push(url);
+  ta.value = lines.join('\n');
+  if (counterId) updateRefCounter(counterId, lines.length, max);
+  const thumbs = document.getElementById(thumbsId);
+  if (!thumbs) return;
+  const chip = document.createElement('div');
+  chip.className = 'ref-thumb';
+  if (/image/.test(thumbsId)) {
+    chip.innerHTML = '<img src="' + url + '" alt="ref" loading="lazy">';
+  } else if (/video/.test(thumbsId)) {
+    chip.innerHTML = '<video src="' + url + '" muted playsinline preload="metadata"></video>';
+  } else {
+    chip.innerHTML = '<div class="ref-thumb-icon" title="' + url + '">AUDIO</div>';
+  }
+  // Save-to-library button (only if we have the blob)
+  if (file) {
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.className = 'ref-thumb-save';
+    saveBtn.title = 'Save to library (persistent)';
+    saveBtn.textContent = '\u{1F4BE}';
+    saveBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      downloadRefToLibrary(kind, file, url);
+    });
+    chip.appendChild(saveBtn);
+  }
+  // Remove button
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'ref-thumb-remove';
+  removeBtn.title = 'Remove';
+  removeBtn.innerHTML = '\u00d7';
+  removeBtn.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    const cur = ta.value.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+    const next = cur.filter((u) => u !== url);
+    ta.value = next.join('\n');
+    if (counterId) updateRefCounter(counterId, next.length, max);
+    if (kind) {
+      if (appState.uploadedRefs[kind]) appState.uploadedRefs[kind] = appState.uploadedRefs[kind].filter((u) => u !== url);
+      if (appState.uploadedRefsFiles[kind]) appState.uploadedRefsFiles[kind] = appState.uploadedRefsFiles[kind].filter((x) => x.url !== url);
+    }
+    chip.remove();
+  });
+  chip.appendChild(removeBtn);
+  thumbs.appendChild(chip);
+}
+
+function updateRefCounter(counterId, current, max) {
+  const el = document.getElementById(counterId);
+  if (!el) return;
+  el.textContent = current + ' / ' + max + (current >= max ? ' (cap reached)' : '');
+}
+
+async function uploadAndAppend(files, kind) {
+  const map = {
+    image: { target: 'ref-image-urls', thumbs: 'ref-image-thumbs', counter: 'ref-image-counter', max: 9, key: 'image' },
+    video: { target: 'ref-video-urls', thumbs: 'ref-video-thumbs', counter: 'ref-video-counter', max: 3, key: 'video' },
+    audio: { target: 'ref-audio-urls', thumbs: 'ref-audio-thumbs', counter: 'ref-audio-counter', max: 3, key: 'audio' },
+  };
+  const m = map[kind];
+  if (!m) return;
+  const remaining = m.max - appState.uploadedRefs[m.key].length;
+  const capped = Array.from(files).slice(0, Math.max(0, remaining));
+  if (capped.length < files.length) showToast('Cap (' + m.max + ') reached; some files skipped', 'warning');
+  for (const f of capped) {
+    try {
+      showLoading('Uploading ' + f.name + '...');
+      const url = await uploadFile(f);
+      appState.uploadedRefs[m.key].push(url);
+      appState.uploadedRefsFiles[m.key].push({ url, file: f });
+      appendRef(url, m.target, m.thumbs, m.counter, m.max, m.key, f);
+      hideLoading();
+    } catch (err) {
+      hideLoading();
+      showToast('Upload failed: ' + err.message, 'error');
+      break;
+    }
+  }
+}
+
+async function handleRefImageUpload(e) { await uploadAndAppend(e.target.files, 'image'); e.target.value = ''; }
+function handleRefImageDrop(e) {
+  e.preventDefault(); e.stopPropagation();
+  document.getElementById('ref-image-drop-zone')?.classList.remove('drag-over');
+  const dt = new DataTransfer();
+  for (const f of (e.dataTransfer.files || [])) dt.items.add(f);
+  const input = document.getElementById('ref-image-drop-input');
+  if (!input) return;
+  input.files = dt.files;
+  handleRefImageUpload({ target: input });
+}
+async function handleRefVideoUpload(e) { await uploadAndAppend(e.target.files, 'video'); e.target.value = ''; }
+function handleRefVideoDrop(e) {
+  e.preventDefault(); e.stopPropagation();
+  document.getElementById('ref-video-drop-zone')?.classList.remove('drag-over');
+  const dt = new DataTransfer();
+  for (const f of (e.dataTransfer.files || [])) dt.items.add(f);
+  const input = document.getElementById('ref-video-drop-input');
+  if (!input) return;
+  input.files = dt.files;
+  handleRefVideoUpload({ target: input });
+}
+async function handleRefAudioUpload(e) { await uploadAndAppend(e.target.files, 'audio'); e.target.value = ''; }
+function handleRefAudioDrop(e) {
+  e.preventDefault(); e.stopPropagation();
+  document.getElementById('ref-audio-drop-zone')?.classList.remove('drag-over');
+  const dt = new DataTransfer();
+  for (const f of (e.dataTransfer.files || [])) dt.items.add(f);
+  const input = document.getElementById('ref-audio-drop-input');
+  if (!input) return;
+  input.files = dt.files;
+  handleRefAudioUpload({ target: input });
+}
+
+async function handleImprove(fieldId) {
+  const ta = document.getElementById(fieldId);
+  if (!ta) return;
+  if (ta.disabled) return;
+  const original = ta.value.trim();
+  if (!original) { showToast('Add a prompt first, then Improve', 'warning'); return; }
+  if (!appState.selectedModel) { showToast('Select a video model first', 'warning'); return; }
+  const btn = document.querySelector(`[onclick*="handleImprove('${fieldId}')"]`);
+  if (btn) btn.disabled = true;
+  const prevHtml = btn ? btn.innerHTML : '';
+  if (btn) btn.innerHTML = '<span class="spinner"></span> Polishing...';
+  try {
+    const resp = await fetch('/api/improve-prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: original, modelId: appState.selectedModel.id }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'improve failed (' + resp.status + ')');
+    ta.value = data.improved || original;
+    ta.dispatchEvent(new Event('input'));
+    if (btn) {
+      btn.innerHTML = 'Undo';
+      btn.disabled = false;
+      btn.onclick = () => {
+        ta.value = original;
+        ta.dispatchEvent(new Event('input'));
+        btn.innerHTML = prevHtml;
+        btn.setAttribute('onclick', "handleImprove('" + fieldId + "')");
+        btn.onclick = null;
+      };
+    }
+    showToast('Prompt polished', 'success');
+  } catch (err) {
+    showToast('Improve failed: ' + err.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// ----- Saved-refs library (IndexedDB-backed) -----
+
+const refDB = {
+  db: 'venice-refs',
+  store: 'refs',
+  version: 1,
+  open() {
+    return new Promise((res, rej) => {
+      const req = indexedDB.open(this.db, this.version);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(this.store)) {
+          db.createObjectStore(this.store, { keyPath: 'id' });
+        }
+      };
+      req.onsuccess = () => res(req.result);
+      req.onerror = () => rej(req.error);
+    });
+  },
+  put(r) {
+    return this.open().then((db) => new Promise((res, rej) => {
+      const tx = db.transaction(this.store, 'readwrite');
+      tx.objectStore(this.store).put(r);
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    }));
+  },
+  all() {
+    return this.open().then((db) => new Promise((res, rej) => {
+      const tx = db.transaction(this.store, 'readonly');
+      const req = tx.objectStore(this.store).getAll();
+      req.onsuccess = () => res(req.result || []);
+      req.onerror = () => rej(req.error);
+    }));
+  },
+  del(id) {
+    return this.open().then((db) => new Promise((res, rej) => {
+      const tx = db.transaction(this.store, 'readwrite');
+      tx.objectStore(this.store).delete(id);
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    }));
+  },
+};
+
+function escapeHTML(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function escapeAttr(s) { return escapeHTML(s); }
+
+async function downloadRefToLibrary(kind, file, url) {
+  if (!file) return;
+  const base = (file.name || 'ref').replace(/\.[^.]+$/, '');
+  const name = prompt('Name this reference', base);
+  if (!name || !name.trim()) return;
+  const id = 'ref-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+  try {
+    await refDB.put({
+      id,
+      name: name.trim().slice(0, 80),
+      kind,
+      file,
+      url,
+      mime: file.type || '',
+      size: file.size || 0,
+      createdAt: Date.now(),
+    });
+    await renderSavedRefs();
+    showToast('Saved "' + name.trim() + '" to library', 'success');
+  } catch (err) {
+    showToast('Save failed: ' + err.message, 'error');
+  }
+}
+
+async function renderSavedRefs() {
+  const list = document.getElementById('saved-refs-list');
+  const empty = document.getElementById('saved-refs-empty');
+  if (!list || !empty) return;
+  let refs;
+  try { refs = await refDB.all(); } catch (e) { return; }
+  refs = refs.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 50);
+  list.innerHTML = '';
+  if (refs.length === 0) {
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  for (const r of refs) {
+    const card = document.createElement('div');
+    card.className = 'saved-ref-card';
+    const thumb = document.createElement('div');
+    thumb.className = 'saved-ref-thumb';
+    if (r.file) {
+      try {
+        const localUrl = URL.createObjectURL(r.file);
+        thumb.innerHTML = '<img src="' + localUrl + '" alt="' + escapeAttr(r.name) + '" loading="lazy">';
+      } catch (e) {
+        thumb.innerHTML = '<div class="saved-ref-icon">↻</div>';
+      }
+    } else if (r.url) {
+      thumb.innerHTML = '<img src="' + escapeAttr(r.url) + '" alt="' + escapeAttr(r.name) + '" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement(\'div\'),{className:\'saved-ref-icon\',textContent:\'↻\'}))">';
+    } else {
+      thumb.innerHTML = '<div class="saved-ref-icon">↻</div>';
+    }
+    card.appendChild(thumb);
+    const label = document.createElement('div');
+    label.className = 'saved-ref-label';
+    label.textContent = r.name;
+    label.title = r.name;
+    card.appendChild(label);
+    const meta = document.createElement('div');
+    meta.className = 'saved-ref-meta';
+    const size = r.size ? Math.round(r.size / 1024) + ' KB' : '';
+    const date = r.createdAt ? new Date(r.createdAt).toLocaleDateString() : '';
+    const kindLabel = r.kind ? r.kind[0].toUpperCase() + r.kind.slice(1) : '';
+    meta.textContent = [kindLabel, size, date].filter(Boolean).join(' · ');
+    card.appendChild(meta);
+    const actions = document.createElement('div');
+    actions.className = 'saved-ref-actions';
+    const loadBtn = document.createElement('button');
+    loadBtn.type = 'button';
+    loadBtn.className = 'saved-ref-load';
+    loadBtn.textContent = 'Load';
+    loadBtn.addEventListener('click', () => loadSavedRef(r));
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'saved-ref-delete';
+    delBtn.textContent = 'Delete';
+    delBtn.addEventListener('click', () => removeSavedRef(r));
+    actions.appendChild(loadBtn);
+    actions.appendChild(delBtn);
+    card.appendChild(actions);
+    list.appendChild(card);
+  }
+}
+
+async function loadSavedRef(r) {
+  showLoading('Re-publishing "' + r.name + '"...');
+  try {
+    let url = r.url;
+    if (!url && r.file) url = await uploadFile(r.file);
+    if (!url) throw new Error('No file or URL available for this reference');
+    const map = {
+      image: ['ref-image-urls', 'ref-image-thumbs', 'ref-image-counter', 9],
+      video: ['ref-video-urls', 'ref-video-thumbs', 'ref-video-counter', 3],
+      audio: ['ref-audio-urls', 'ref-audio-thumbs', 'ref-audio-counter', 3],
+    };
+    const entry = map[r.kind] || map.image;
+    appendRef(url, entry[0], entry[1], entry[2], entry[3], r.kind, r.file);
+    hideLoading();
+    showToast('Loaded "' + r.name + '"', 'success');
+  } catch (err) {
+    hideLoading();
+    showToast('Load failed: ' + err.message, 'error');
+  }
+}
+
+async function removeSavedRef(r) {
+  if (!confirm('Delete saved reference "' + r.name + '"?')) return;
+  try {
+    await refDB.del(r.id);
+    await renderSavedRefs();
+  } catch (err) {
+    showToast('Delete failed: ' + err.message, 'error');
+  }
+}
+
 // Mode Switching
 function switchMode(mode) {
   appState.mode = mode;
@@ -185,6 +617,7 @@ function switchMode(mode) {
   // Show/hide input sections
   document.getElementById('text-input-section').classList.toggle('hidden', mode !== 'text-to-video');
   document.getElementById('image-input-section').classList.toggle('hidden', mode !== 'image-to-video');
+  document.getElementById('video-input-section').classList.toggle('hidden', mode !== 'video-to-video');
 
   // Render models for this mode
   renderModels();
@@ -197,9 +630,13 @@ function switchMode(mode) {
 function renderModels() {
   const grid = document.getElementById('model-grid');
   const models = MODELS[appState.mode] || [];
-  const otherMode = appState.mode === 'text-to-video' ? 'image-to-video' : 'text-to-video';
-  const otherModelsCount = MODELS[otherMode]?.length || 0;
-  const totalModelsCount = MODELS['text-to-video']?.length + MODELS['image-to-video']?.length || 0;
+  const allModes = ['text-to-video', 'image-to-video', 'video-to-video'];
+  const totalModelsCount = allModes.reduce((n, m) => n + (MODELS[m]?.length || 0), 0);
+  const otherModes = allModes.filter((m) => m !== appState.mode);
+  const otherModelsCount = otherModes.reduce((n, m) => n + (MODELS[m]?.length || 0), 0);
+  const otherModeNames = otherModes.filter((m) => (MODELS[m]?.length || 0) > 0)
+                                   .map((m) => m.replace(/-/g, ' '))
+                                   .join(', ');
 
   if (models.length === 0) {
     let message = '';
@@ -210,12 +647,10 @@ function renderModels() {
         <p style="font-size: 0.9rem;">Click the key icon in the header to add your Venice API key.</p>
       `;
     } else if (otherModelsCount > 0) {
-      // Models loaded for other mode but not this one
       const modeDisplay = appState.mode.replace(/-/g, ' ');
-      const otherModeDisplay = otherMode.replace(/-/g, ' ');
       message = `
         <p style="margin-bottom: var(--space-md);">No ${modeDisplay} models available.</p>
-        <p style="font-size: 0.9rem;">${otherModelsCount} ${otherModeDisplay} model${otherModelsCount > 1 ? 's' : ''} loaded. Switch to ${otherModeDisplay} mode to see them.</p>
+        <p style="font-size: 0.9rem;">Switch to ${otherModeNames} mode to see them.</p>
       `;
     } else {
       // Models loaded but none for this mode
@@ -654,14 +1089,17 @@ function buildGenerationParams() {
     params.reference_video_total_duration = refVideoDur.value.trim();
   }
 
-  // Prompt + primary visual input.
+  // Prompt + primary visual input. Four modes share the same params API;
+  // only the field ids and primary input channel differ.
   if (appState.mode === 'text-to-video') {
     params.prompt = document.getElementById('prompt').value.trim();
-    // Text models may still take explicit reference images (advanced).
     if (refImageUrls.length) params.reference_image_urls = refImageUrls;
+  } else if (appState.mode === 'video-to-video') {
+    params.video_url = appState.uploadedVideoUrl || '';
+    const el = document.getElementById('video-motion-prompt');
+    params.prompt = (el && el.value || '').trim();
   } else {
     const uploaded = appState.uploadedImageUrl || '';
-    // The uploaded image plus any extra reference image URLs.
     if (model.requiresReference) {
       const all = [];
       if (uploaded) all.push(uploaded);
