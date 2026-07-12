@@ -161,15 +161,27 @@ class VeniceAPI {
     // the model's advertised durations when we know them.
     if (params.duration !== undefined && params.duration !== null && params.duration !== '') {
       let dur;
-      if (typeof params.duration === 'string' && params.duration.endsWith('s')) {
-        dur = params.duration;
-      } else {
-        const n = parseInt(params.duration);
-        if (!isNaN(n)) dur = `${n}s`;
+      if (typeof params.duration === 'string') {
+        if (params.duration === 'auto' || params.duration === 'Auto') {
+          // 🆕 V2V edit models advertise `durations: ['Auto']`; preserve the
+          //    literal 'auto' (lowercase) so the API returns source-duration.
+          dur = 'auto';
+        } else if (params.duration.endsWith('s')) {
+          dur = params.duration;
+        } else {
+          const n = parseInt(params.duration);
+          if (!isNaN(n)) dur = `${n}s`;
+        }
       }
       if (dur) {
-        const allowed = (c.durations || []).map(d =>
-          typeof d === 'string' ? (d.endsWith('s') ? d : `${d}s`) : `${d}s`);
+        const allowed = (c.durations || []).map(d => {
+          // 🆕 Normalize Venice's `durations: ['Auto']` literal into 'auto'
+          //    (lowercase). All other string entries get suffixed with 's'
+          //    if they aren't already a 'Ns'/'Ms' style.
+          const s = String(d);
+          if (s.toLowerCase() === 'auto') return 'auto';
+          return s.endsWith('s') ? s : `${s}s`;
+        });
         body.duration = (allowed.length && !allowed.includes(dur)) ? allowed[0] : dur;
       }
     }
@@ -216,6 +228,10 @@ class VeniceAPI {
       if (refs.length) body.reference_image_urls = refs.slice(0, 9);
     } else if (mode === 'video') {
       if (params.video_url) body.video_url = params.video_url;
+      // 🆕 V2V edit models (Wan Edit, Grok V2V Private, HappyHorse Edit)
+      //    commonly accept reference_image_urls for character/scene refs.
+      //    Auto-heal retry strips on rejection.
+      if (refs.length) body.reference_image_urls = refs.slice(0, 9);
     } else {
       // text-to-video: still honour explicit reference images if the user
       // supplied them (some text models accept style/character references).
