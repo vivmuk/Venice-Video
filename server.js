@@ -205,7 +205,7 @@ app.post('/api/upload', (req, res) => {
       formData.append('time', '72h');
       const blob = new Blob([payload], { type: req.file.mimetype });
       formData.append('fileToUpload', blob, filename);
-      const upstream = await fetch('https://litterbox.catbox.moe/resources', { method: 'POST', body: formData });
+      const upstream = await fetch('https://litterbox.catbox.moe/resources/internals/api.php', { method: 'POST', body: formData });
       const text = await upstream.text();
       if (!upstream.ok) throw new Error('litterbox ' + upstream.status + ': ' + text.slice(0, 200));
       return res.json({ url: text.trim(), bytes: req.file.size, mime: req.file.mimetype, isImage });
