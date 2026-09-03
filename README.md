@@ -4,157 +4,303 @@ A clean, Swiss-designed interface for generating videos using the Venice AI API.
 
 ## Features
 
-- **Model-aware parameters**: The request sent to Venice is built per-model from the
-  model's own `constraints`, so only supported parameters are included (duration,
-  aspect ratio, resolution, audio) and invalid values are coerced to a valid option.
-- **Self-healing requests**: Every model accepts a *different* set of parameters. If
-  Venice rejects a specific field (e.g. `"This model does not support audio
-  configuration"`), the app strips exactly that field — read from the API's own error
-  `path` — and retries, so a generation never fails just because one optional
-  parameter isn't supported by the chosen model.
-- **Text-, Image-, Reference- and Video-to-Video**: Reference-to-video models are
-  supported — images/videos are sent as `reference_image_urls` / `reference_video_urls`.
-- **Full reference & media inputs**: Reference images, reference videos, reference
-  audio, end frame, and Seedance's reference-video duration are all exposed as
-  advanced fields and passed through to the API.
-- **Audio on by default**: For models that support audio generation, the audio toggle
-  defaults to ON.
-- **Advanced options**: Negative prompt, seed (with randomizer), and
-  auto-delete-on-completion are all wired through to the API.
-- **Automatic reference fallback**: If a model rejects `image_url` and requires a
-  reference array, the app automatically retries with `reference_image_urls`.
-- **Swiss Design**: Clean typography, ample whitespace, and a minimal color palette.
-- **Responsive Layout**: Works on desktop and mobile devices.
+- **Four model categories, all models listed**: Text-, Image-, Reference- and
+  Video-to-video each get their own tab. Reference-to-video is now a first-class
+  category rather than being folded into Image, because its inputs and prompt
+  syntax are different.
+- **Recommended first, then newest first**: each tab opens on two or three
+  models Venice itself flags (`venice_recommendations` / `featured`), with the
+  full list — every model the API returns — folded behind *All models*, ordered
+  newest first. A filter box narrows the list by name, id or model set.
+- **Reference tags that stay correct**: every reference you drop is numbered and
+  labelled (`@Image1`, `@Image2`, `@Element1`…). Click a chip to insert that tag
+  at the caret; type `@ref 2`, `@character3` or `@picture-1` and it is rewritten
+  into the exact spelling Venice matches on. Delete a reference and the later
+  tags in your prompt renumber themselves, so the prompt never drifts out of
+  sync with the request arrays.
+- **Model-aware parameters**: every control is derived from the selected model's
+  own `constraints` — duration, aspect ratio, resolution or upscale factor,
+  audio, prompt length, reference caps and which reference lanes exist. Controls
+  a model does not accept are not shown at all.
+- **Self-healing requests**: if Venice rejects a specific field, the app strips
+  exactly that field — read from the API's own error `path` — and retries. When
+  the rejected field is a tagged reference lane (`elements` / `scene_image_urls`)
+  its images are folded into `reference_image_urls` and the prompt's tags are
+  renumbered to follow them, so the references still bind.
+- **Audio done properly**: `audio: true` in the constraints only means the model
+  produces a soundtrack; `audio_configurable` is what says the request may carry
+  the `audio` flag. The toggle appears only for the 44 models that accept it;
+  the rest show a note saying audio is always on.
+- **Swiss Design**: clean typography, ample whitespace, and a minimal palette.
+- **Responsive Layout**: works on desktop and mobile devices.
+
+## How parameters are chosen per model
+
+`VeniceAPI.capabilities(modelId, constraints)` is the single source of truth. It
+reads the model's published constraints and returns the exact parameter surface
+for that model; the UI and the request builder both read from it.
+
+| Constraint | Drives |
+|---|---|
+| `model_type`, `video_input`, id suffix | Which tab the model appears in (text / image / reference / video) |
+| `durations` | Duration pills. Kept as strings, so the literal `Auto` the edit and upscale models require survives |
+| `aspect_ratios` | Aspect-ratio pills — hidden entirely when the list is empty |
+| `resolutions` | Resolution pills; a list of `2x` / `4x` marks an upscale model, which gets Upscale Factor pills and sends `upscale_factor` instead of `resolution` |
+| `audio` | Whether the model produces sound |
+| `audio_configurable` | Whether the `audio` toggle is offered at all |
+| `audio_input` | Whether the Audio Track URL (`audio_url`) field is shown |
+| `per_reference_audio` | Whether the Reference Audio lane (`reference_audio_urls`) is shown |
+| `prompt_character_limit` | The prompt counter's limit and the validation cut-off (Runway 1000, Grok 4096, otherwise 5000) |
+| `reference_image_min_short_side_pixels` | The minimum-size hint on the reference drop zone |
+
+Two things Venice does not publish in `constraints` are named explicitly in
+`js/api.js`: the Kling O3 / V3 reference-to-video family, which accepts
+`elements[]` and `scene_image_urls[]`, and the `-transition` models, which
+require an end frame. Both are documented at their definitions, and the
+self-healing retry covers the case where the table and the API disagree.
+
+Because Venice stamps a few models (Veo 3.1, LTX Video 2.0, Kling 2.6) with a
+`created` date a year earlier than they shipped — before Venice had video at all
+— `VeniceAPI.releaseRank()` shifts any pre-launch timestamp forward a year so
+"newest first" matches the real release order.
+
+## Reference tags (`@Image1`, `@Element1`)
+
+Venice indexes reference media by position in the request array, and the prompt
+addresses those positions by tag:
+
+| Prompt tag | Request field | Cap |
+|---|---|---|
+| `@Image1`…`@Image9` | `reference_image_urls[]` | 9 |
+| `@Image1`…`@Image4` | `scene_image_urls[]` (elements-capable models) | 4 |
+| `@Element1`…`@Element4` | `elements[]` | 4 |
+
+`js/reftags.js` owns the whole tag lifecycle:
+
+- `normalize()` rewrites any accepted spelling (`@image 1`, `@ref-2`,
+  `@character3`, `@picture_1`) into the canonical `@Image1` / `@Element1`. It
+  runs when a prompt field loses focus and again just before submission.
+- `remap()` renumbers tags when a reference is removed, so deleting the second
+  of three references turns `@Image3` into `@Image2`.
+- `retarget()` re-points tags at a different array — used by the self-healing
+  retry when `elements` has to fall back to `reference_image_urls`.
+- `audit()` reports tags that point at a slot with nothing in it; the UI warns
+  under the prompt and generation is blocked until it is resolved.
 
 ## Supported request parameters
 
 The app builds `POST /video/queue` (and `/video/quote`) bodies from the following
-fields, matching the current Venice video API (verified against
-[veniceai/api-docs](https://github.com/veniceai/api-docs)). Each is only included
-when the selected model supports it, and any field the API reports as unsupported for
-a given model is dropped automatically on retry:
+fields, matching the current Venice video API. Each is only included when the
+selected model's capabilities say so, and any field the API reports as
+unsupported is dropped automatically on retry:
 
-| Parameter | Type | Notes |
-|-----------|------|-------|
-| `model` | string | Required. Full model id, e.g. `veo3.1-fast-text-to-video`. |
-| `prompt` | string | Required for text-to-video; also used as the motion prompt for image/reference models. |
-| `negative_prompt` | string | Optional. What to avoid. |
-| `duration` | string | Sent as `"5s"`, `"8s"`, … and validated against the model's `durations`. |
-| `aspect_ratio` | string | Only sent when the model advertises `aspect_ratios` (`16:9`, `9:16`, `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `21:9`). |
-| `resolution` | string | Only sent when supported (`480p`/`720p`/`1080p`/`2160p`). |
-| `seed` | integer | Optional. Reuse for reproducible results. |
-| `audio` | boolean | Sent when the model supports audio; defaults ON. Auto-stripped if the model rejects it. |
+| Parameter | Type | Included when |
+|-----------|------|---------------|
+| `model` | string | Always. |
+| `prompt` | string | The model takes a prompt (everything but upscale). Truncated to the model's `prompt_character_limit`, and reference tags are canonicalised first. |
+| `negative_prompt` | string | Non-upscale models. |
+| `duration` | string | The model publishes `durations`. Sent as `"5s"`, `"8s"`, or the literal `"Auto"`. |
+| `aspect_ratio` | string | The model publishes `aspect_ratios`. |
+| `resolution` | string | The model publishes `resolutions` and is not an upscale model. |
+| `upscale_factor` | integer | Upscale models (`resolutions` of `2x` / `4x`), in place of `resolution`. |
+| `seed` | integer | Non-upscale models, when a seed is entered. |
+| `audio` | boolean | `audio_configurable` is true. Defaults on. |
 | `image_url` | string (URL) | Image-to-video starting frame. |
-| `end_image_url` | string (URL) | Optional end frame / transition target. |
-| `video_url` | string (URL) | Source clip for video-to-video models. |
-| `audio_url` | string (URL) | Audio input for models that accept it. |
-| `reference_image_urls` | string[] | Character/scene references (up to 9). |
-| `reference_video_urls` | string[] | Reference video clips (up to 3). |
-| `reference_audio_urls` | string[] | Reference audio donors (up to 3). Must accompany an image/video reference — audio-only is rejected. |
-| `scene_image_urls` | string[] | Scene references (up to 4). |
-| `elements` | object[] | Multi-character structure (up to 4): `{ frontal_image_url, reference_image_urls, video_url }`. |
-| `reference_video_total_duration` | integer | Seedance 2.0 reference-video total duration (seconds). |
-| `upscale_factor` | integer | For upscale models (`1`, `2`, `4`). |
-
-> The app reads the live model list from `GET /models?type=video` and derives each
-> model's input mode (text / image / reference / video) from its id and `model_type`,
-> so new models added by Venice are picked up automatically. Because model parameter
-> support varies, the request builder plus the self-healing retry together ensure only
-> the parameters a given model actually accepts end up in the final request.
+| `end_image_url` | string (URL) | Image-driven models; required on `-transition` models. |
+| `video_url` | string (URL) | Video-input models. |
+| `audio_url` | string (URL) | `audio_input` models — a background music track. |
+| `reference_image_urls` | string[] | The `@Image` lane on models without an element lane (max 9). |
+| `scene_image_urls` | string[] | The `@Image` lane on elements-capable models (max 4). |
+| `elements` | object[] | The `@Element` lane on elements-capable models (max 4): `{ frontal_image_url }`. |
+| `reference_video_urls` | string[] | Reference- and video-mode models (max 3). |
+| `reference_audio_urls` | string[] | `per_reference_audio` models (max 3). Must accompany an image/video reference. |
+| `reference_video_total_duration` | integer | Reference- and video-mode models. |
 
 ## Usage
 
-1. Navigate to the "Input" tab
-2. Fill in the video parameters:
-   - **Prompt**: Describe the video you want to generate
-   - **Duration**: Set the length of the video in seconds
-   - **Style**: Choose a visual style for the video
-   - **Camera Movement**: Select camera motion options
-   - **Resolution**: Set the output resolution
-   - **Aspect Ratio**: Choose the video aspect ratio
-3. Click "Generate Video" to start the process
-4. Switch to the "Processing" tab to monitor progress
-5. Once complete, view the video in the "Video Display" tab
+1. **Pick a category** in the header: Text, Image, Reference or Video.
+2. **Pick a model.** Two or three of Venice's recommended picks are shown up
+   front; open *All models* for the full list (newest first) or type in the
+   filter box. The sidebar summarises what the model you chose accepts.
+3. **Give it its input** — a prompt, a source image, references, or a source
+   clip, depending on the category.
+4. **In Reference mode**, drop your references first. Each is numbered on the
+   spot (`@Image1`, `@Element1`…); click a chip to drop that tag into the
+   prompt. Tags are rewritten into the API's exact form, and renumbered if you
+   remove a reference.
+5. **Set the parameters.** Only the controls the selected model supports appear;
+   defaults are already valid for it.
+6. Optionally hit **Estimate Cost** first, then **Generate Video**. Progress
+   shows in the sidebar and the finished clip appears below with a download
+   button.
 
 ## Parameter Showcase
 
 ### Video Models
 
-#### Text-to-Video Models
+Read live from `GET /models?type=video`; the snapshot below is the bundled
+`venice-model-spec-cache.json` and is ordered newest first, exactly as the app
+orders each tab. `Audio` is `yes` when the model produces a soundtrack and
+`toggle` when the request may also carry the `audio` flag.
 
-| Model Name | Max Resolution | Duration Range | Audio Support | Special Features |
-|------------|----------------|----------------|---------------|------------------|
-| veo3-fast-text-to-video | 1080p | 4-8s | Yes | Fast generation |
-| veo3-full-text-to-video | 1080p | 4-8s | Yes | Full quality |
-| veo3.1-fast-text-to-video | 1080p | 4-8s | Yes | Updated fast model |
-| veo3.1-full-text-to-video | 1080p | 4-8s | Yes | Updated full quality |
-| sora-2-text-to-video | 720p | 4-12s | Yes | Sora 2 model |
-| sora-2-pro-text-to-video | 1080p | 4-12s | Yes | Sora 2 Pro model |
-| wan-2.5-preview-text-to-video | 480p | 5-10s | Yes | WAN 2.5 preview |
-| wan-2.2-a14b-text-to-video | 480p | 5s | No | WAN 2.2 A14B |
-| kling-2.6-pro-text-to-video | N/A | 5-10s | Yes | Kling 2.6 Pro |
-| kling-2.5-turbo-pro-text-to-video | N/A | 5-10s | No | Kling 2.5 Turbo Pro |
-| ltx-2-fast-text-to-video | 2160p | 6-20s | Yes | LTX 2 Fast |
-| ltx-2-full-text-to-video | 2160p | 6-10s | Yes | LTX 2 Full |
-| longcat-distilled-text-to-video | 720p | 5-30s | No | Distilled model |
-| longcat-text-to-video | 720p | 5-30s | No | Longcat model |
+#### Text-to-Video — 37 models
 
-#### Image-to-Video Models
+| Model | ID | Duration | Resolution | Aspect ratios | Audio | Notes |
+|---|---|---|---|---|---|---|
+| Gemini Omni Flash | `gemini-omni-flash-text-to-video` | 4–10s | — | 16:9, 9:16 | no | — |
+| HappyHorse 1.1 | `happyhorse-1-1-text-to-video` | 3–15s | 1080p, 720p | 16:9, 9:16, 1:1, 4:3, 3:4, 21:9, 9:21, 5:4, 4:5 | yes, always on | — |
+| Kling V3 Turbo Pro | `kling-v3-turbo-pro-text-to-video` | 3–15s | — | 16:9, 9:16, 1:1 | no | — |
+| Kling V3 Turbo Standard | `kling-v3-turbo-standard-text-to-video` | 3–15s | — | 16:9, 9:16, 1:1 | no | — |
+| Wan 2.7 Uncensored | `wan-2-7-uncensored-text-to-video` | 5–15s | 1080p, 720p | 16:9, 9:16, 1:1 | yes, always on | — |
+| HappyHorse 1.0 | `happyhorse-1-0-text-to-video` | 3–15s | 1080p, 720p | 16:9, 9:16, 1:1 | yes, always on | — |
+| Kling O3 4K | `kling-o3-4k-text-to-video` | 3–15s | — | 16:9, 9:16, 1:1 | yes, toggle | — |
+| Kling V3 4K | `kling-v3-4k-text-to-video` | 3–15s | — | 16:9, 9:16, 1:1 | yes, toggle | — |
+| Grok Imagine Private | `grok-imagine-text-to-video-private` | 1–15s | 480p, 720p | 16:9, 4:3, 3:2, 1:1, 2:3, 3:4, 9:16 | yes, always on | prompt ≤ 4096 |
+| Runway Gen-4.5 | `runway-gen4-5-text` | 2–10s | — | 16:9, 9:16 | no | prompt ≤ 1000 |
+| PixVerse C1 | `pixverse-c1-text-to-video` | 3–15s | 360p, 540p, 720p, 1080p | 16:9, 4:3, 1:1, 3:4, 9:16, 2:3, 3:2, 21:9 | yes, toggle | — |
+| Wan 2.7 | `wan-2-7-text-to-video` | 5–15s | 1080p, 720p | 16:9, 9:16, 1:1 | no | `audio_url` input |
+| LTX Video 2.3 Fast | `ltx-2-v2-3-fast-text-to-video` | 6–20s | 1080p, 1440p, 2160p | 16:9, 9:16 | yes, toggle | — |
+| LTX Video 2.3 Full Quality | `ltx-2-v2-3-full-text-to-video` | 6–10s | 1080p, 1440p, 2160p | 16:9, 9:16 | yes, toggle | — |
+| Kling O3 Pro | `kling-o3-pro-text-to-video` | 3–15s | — | 16:9, 9:16, 1:1 | yes, toggle | — |
+| Kling O3 Standard | `kling-o3-standard-text-to-video` | 3–15s | — | 16:9, 9:16, 1:1 | yes, toggle | — |
+| Kling V3 Pro | `kling-v3-pro-text-to-video` | 3–15s | — | 16:9, 9:16, 1:1 | yes, toggle | — |
+| Kling V3 Standard | `kling-v3-standard-text-to-video` | 3–15s | — | 16:9, 9:16, 1:1 | yes, toggle | — |
+| Vidu Q3 | `vidu-q3-text-to-video` | 3–16s | 360p, 540p, 720p, 1080p | 16:9, 9:16, 4:3, 3:4, 1:1 | yes, toggle | — |
+| PixVerse v5.6 | `pixverse-v5.6-text-to-video` | 5s/8s | 360p, 540p, 720p, 1080p | 16:9, 9:16, 1:1, 4:3, 3:4 | yes, toggle | — |
+| LTX Video 2.0 19B Distilled | `ltx-2-19b-distilled-text-to-video` | 5–18s | 720p | 16:9, 4:3, 1:1, 3:4, 9:16 | yes, toggle | — |
+| LTX Video 2.0 19B | `ltx-2-19b-full-text-to-video` | 5–18s | 720p | 16:9, 4:3, 1:1, 3:4, 9:16 | yes, toggle | — |
+| Wan 2.6 | `wan-2.6-text-to-video` | 5–15s | 1080p, 720p | 16:9, 9:16, 1:1 | yes, toggle | `audio_url` input |
+| Longcat Distilled | `longcat-distilled-text-to-video` | 5–30s | 720p | 16:9, 9:16, 1:1 | no | — |
+| Longcat Full Quality | `longcat-text-to-video` | 5–30s | 720p | 16:9, 9:16, 1:1 | no | — |
+| Kling 2.6 Pro | `kling-2.6-pro-text-to-video` | 5s/10s | — | 16:9, 9:16, 1:1 | yes, toggle | — |
+| LTX Video 2.0 Fast | `ltx-2-fast-text-to-video` | 6–20s | 1080p, 1440p, 2160p | 16:9 | yes, toggle | — |
+| LTX Video 2.0 Full Quality | `ltx-2-full-text-to-video` | 6–10s | 1080p, 1440p, 2160p | 16:9 | yes, toggle | — |
+| Veo 3.1 Fast | `veo3.1-fast-text-to-video` | 4–8s | 720p, 1080p, 4k | 16:9, 9:16 | yes, toggle | — |
+| Veo 3.1 Full Quality | `veo3.1-full-text-to-video` | 4–8s | 720p, 1080p, 4k | 16:9, 9:16 | yes, toggle | — |
+| Kling 2.5 Turbo Pro | `kling-2.5-turbo-pro-text-to-video` | 5s/10s | — | 16:9, 9:16, 1:1 | no | — |
+| Sora 2 Pro | `sora-2-pro-text-to-video` | 4–20s | 720p, 1080p, true_1080p | 16:9, 9:16 | yes, always on | — |
+| Sora 2 | `sora-2-text-to-video` | 4–12s | 720p | 16:9, 9:16 | yes, always on | — |
+| Veo 3 Fast | `veo3-fast-text-to-video` | 4–8s | 720p, 1080p | 16:9, 9:16 | yes, always on | — |
+| Veo 3 Full Quality | `veo3-full-text-to-video` | 4–8s | 720p, 1080p | 16:9, 9:16 | yes, always on | — |
+| Wan 2.2 A14B | `wan-2.2-a14b-text-to-video` | 5s | 720p, 580p, 480p | 16:9, 9:16, 1:1 | no | — |
+| Wan 2.5 Preview | `wan-2.5-preview-text-to-video` | 5s/10s | 1080p, 720p, 480p | 16:9, 9:16, 1:1 | yes, always on | `audio_url` input |
 
-| Model Name | Max Resolution | Duration Range | Audio Support | Special Features |
-|------------|----------------|----------------|---------------|------------------|
-| veo3-fast-image-to-video | N/A | 8s | Yes | Fast generation |
-| veo3-full-image-to-video | N/A | 8s | Yes | Full quality |
-| veo3.1-fast-image-to-video | 1080p | 8s | Yes | Updated fast model |
-| veo3.1-full-image-to-video | 1080p | 8s | Yes | Updated full quality |
-| sora-2-image-to-video | 720p | 4-12s | Yes | Sora 2 model |
-| sora-2-pro-image-to-video | 1080p | 4-12s | Yes | Sora 2 Pro model |
-| wan-2.5-preview-image-to-video | 480p | 5-10s | Yes | WAN 2.5 preview |
-| wan-2.1-pro-image-to-video | N/A | 6s | No | WAN 2.1 Pro |
-| kling-2.6-pro-image-to-video | N/A | 5-10s | Yes | Kling 2.6 Pro |
-| kling-2.5-turbo-pro-image-to-video | N/A | 5-10s | No | Kling 2.5 Turbo Pro |
-| ltx-2-fast-image-to-video | 2160p | 6-20s | Yes | LTX 2 Fast |
-| ltx-2-full-image-to-video | 2160p | 6-10s | Yes | LTX 2 Full |
-| longcat-distilled-image-to-video | 720p | 5-30s | No | Distilled model |
-| longcat-image-to-video | 720p | 5-30s | No | Longcat model |
-| ovi-image-to-video | N/A | 5s | Yes | OVI model |
+#### Image-to-Video — 42 models
+
+| Model | ID | Duration | Resolution | Aspect ratios | Audio | Notes |
+|---|---|---|---|---|---|---|
+| Gemini Omni Flash | `gemini-omni-flash-image-to-video` | 4–10s | — | 16:9, 9:16 | no | — |
+| HappyHorse 1.1 | `happyhorse-1-1-image-to-video` | 3–15s | 1080p, 720p | — | yes, always on | refs ≥ 300px |
+| Kling V3 Turbo Pro | `kling-v3-turbo-pro-image-to-video` | 3–15s | — | — | no | — |
+| Kling V3 Turbo Standard | `kling-v3-turbo-standard-image-to-video` | 3–15s | — | — | no | — |
+| Grok Imagine 1.5 Private | `grok-imagine-1-5-image-to-video-private` | 1–15s | 480p, 720p | — | yes, always on | prompt ≤ 4096 |
+| Wan 2.7 Uncensored | `wan-2-7-uncensored-image-to-video` | 5–15s | 1080p, 720p | — | yes, always on | — |
+| HappyHorse 1.0 | `happyhorse-1-0-image-to-video` | 3–15s | 1080p, 720p | — | yes, always on | refs ≥ 300px |
+| Kling O3 4K | `kling-o3-4k-image-to-video` | 3–15s | — | — | yes, toggle | — |
+| Grok Imagine Private | `grok-imagine-image-to-video-private` | 1–15s | 480p, 720p | — | yes, always on | prompt ≤ 4096 |
+| Runway Gen-4.5 | `runway-gen4-5` | 2–10s | — | 16:9, 9:16, 1:1, 4:3, 3:4, 21:9 | no | prompt ≤ 1000 |
+| PixVerse C1 | `pixverse-c1-image-to-video` | 3–15s | 360p, 540p, 720p, 1080p | — | yes, toggle | — |
+| PixVerse C1 Transition | `pixverse-c1-transition` | 3–15s | 360p, 540p, 720p, 1080p | 16:9, 4:3, 1:1, 3:4, 9:16, 2:3, 3:2, 21:9 | yes, toggle | end frame required |
+| Wan 2.7 | `wan-2-7-image-to-video` | 5–15s | 1080p, 720p | — | no | `audio_url` input |
+| LTX Video 2.3 Fast | `ltx-2-v2-3-fast-image-to-video` | 6–20s | 1080p, 1440p, 2160p | 16:9, 9:16 | yes, toggle | — |
+| LTX Video 2.3 Full Quality | `ltx-2-v2-3-full-image-to-video` | 6–10s | 1080p, 1440p, 2160p | 16:9, 9:16 | yes, toggle | — |
+| Kling O3 Pro | `kling-o3-pro-image-to-video` | 3–15s | — | — | yes, toggle | — |
+| Kling O3 Standard | `kling-o3-standard-image-to-video` | 3–15s | — | — | yes, toggle | — |
+| Kling V3 Pro | `kling-v3-pro-image-to-video` | 3–15s | — | — | yes, toggle | — |
+| Kling V3 Standard | `kling-v3-standard-image-to-video` | 3–15s | — | — | yes, toggle | — |
+| Vidu Q3 | `vidu-q3-image-to-video` | 3–16s | 360p, 540p, 720p, 1080p | — | yes, toggle | — |
+| PixVerse v5.6 | `pixverse-v5.6-image-to-video` | 5s/8s | 360p, 540p, 720p, 1080p | — | yes, toggle | — |
+| PixVerse v5.6 Transition | `pixverse-v5.6-transition` | 5s/8s | 360p, 540p, 720p, 1080p | 16:9, 9:16, 1:1, 4:3, 3:4 | yes, toggle | end frame required |
+| Runway Gen-4 Turbo | `runway-gen4-turbo` | 2–10s | — | 16:9, 9:16, 1:1, 4:3, 3:4, 21:9 | no | prompt ≤ 1000 |
+| Wan 2.6 Flash | `wan-2.6-flash-image-to-video` | 5–15s | 1080p, 720p | — | yes, always on | `audio_url` input |
+| LTX Video 2.0 19B Distilled | `ltx-2-19b-distilled-image-to-video` | 5–18s | 720p | 16:9, 4:3, 1:1, 3:4, 9:16 | yes, toggle | — |
+| LTX Video 2.0 19B | `ltx-2-19b-full-image-to-video` | 5–18s | 720p | 16:9, 4:3, 1:1, 3:4, 9:16 | yes, toggle | — |
+| Wan 2.6 | `wan-2.6-image-to-video` | 5–15s | 1080p, 720p | — | yes, toggle | `audio_url` input |
+| Longcat Distilled | `longcat-distilled-image-to-video` | 5–30s | 720p | — | no | — |
+| Longcat Full Quality | `longcat-image-to-video` | 5–30s | 720p | — | no | — |
+| Kling 2.6 Pro | `kling-2.6-pro-image-to-video` | 5s/10s | — | — | yes, toggle | — |
+| LTX Video 2.0 Fast | `ltx-2-fast-image-to-video` | 6–20s | 1080p, 1440p, 2160p | 16:9 | yes, toggle | — |
+| LTX Video 2.0 Full Quality | `ltx-2-full-image-to-video` | 6–10s | 1080p, 1440p, 2160p | 16:9 | yes, toggle | — |
+| Veo 3.1 Fast | `veo3.1-fast-image-to-video` | 4–8s | 720p, 1080p, 4k | — | yes, toggle | — |
+| Veo 3.1 Full Quality | `veo3.1-full-image-to-video` | 4–8s | 720p, 1080p, 4k | — | yes, toggle | — |
+| Kling 2.5 Turbo Pro | `kling-2.5-turbo-pro-image-to-video` | 5s/10s | — | — | no | — |
+| Ovi | `ovi-image-to-video` | 5s | — | — | yes, always on | — |
+| Sora 2 | `sora-2-image-to-video` | 4–12s | 720p | 16:9, 9:16 | yes, always on | — |
+| Sora 2 Pro | `sora-2-pro-image-to-video` | 4–20s | 720p, 1080p, true_1080p | 16:9, 9:16 | yes, always on | — |
+| Veo 3 Fast | `veo3-fast-image-to-video` | 8s | — | 16:9 | yes, always on | — |
+| Veo 3 Full Quality | `veo3-full-image-to-video` | 8s | — | 16:9 | yes, always on | — |
+| Wan 2.1 Pro | `wan-2.1-pro-image-to-video` | 6s | — | 16:9 | no | — |
+| Wan 2.5 Preview | `wan-2.5-preview-image-to-video` | 5s/10s | 1080p, 720p, 480p | — | yes, always on | `audio_url` input |
+
+#### Reference-to-Video — 10 models
+
+| Model | ID | Duration | Resolution | Aspect ratios | Audio | Notes |
+|---|---|---|---|---|---|---|
+| Gemini Omni Flash R2V | `gemini-omni-flash-reference-to-video` | 4–10s | — | 16:9, 9:16 | no | — |
+| HappyHorse 1.1 Reference | `happyhorse-1-1-reference-to-video` | 3–15s | 1080p, 720p | 16:9, 9:16, 1:1, 4:3, 3:4, 21:9, 9:21, 5:4, 4:5 | yes, always on | refs ≥ 400px |
+| HappyHorse 1.0 Reference | `happyhorse-1-0-reference-to-video` | 3–15s | 1080p, 720p | 16:9, 9:16, 1:1, 4:3, 3:4 | yes, always on | refs ≥ 400px |
+| Kling O3 4K R2V | `kling-o3-4k-reference-to-video` | 3–15s | — | 16:9, 9:16, 1:1 | yes, toggle | `elements[]` + `scene_image_urls[]` (`@Element`/`@Image`) |
+| Kling V3 4K R2V | `kling-v3-4k-reference-to-video` | 3–15s | — | — | yes, toggle | `elements[]` + `scene_image_urls[]` (`@Element`/`@Image`) |
+| Grok Imagine R2V Private | `grok-imagine-reference-to-video-private` | 1–10s | 480p, 720p | 16:9, 4:3, 3:2, 1:1, 2:3, 3:4, 9:16 | no | prompt ≤ 4096 |
+| PixVerse C1 R2V | `pixverse-c1-reference-to-video` | 3–15s | 360p, 540p, 720p, 1080p | 16:9, 4:3, 1:1, 3:4, 9:16, 2:3, 3:2, 21:9 | yes, toggle | — |
+| Wan 2.7 Reference | `wan-2-7-reference-to-video` | 5s/10s | 1080p, 720p | — | yes, always on | `reference_audio_urls` |
+| Kling O3 Standard R2V | `kling-o3-standard-reference-to-video` | 3–15s | — | 16:9, 9:16, 1:1 | yes, toggle | `elements[]` + `scene_image_urls[]` (`@Element`/`@Image`) |
+| Kling O3 Pro R2V | `kling-o3-pro-reference-to-video` | 3–15s | — | 16:9, 9:16, 1:1 | yes, toggle | `elements[]` + `scene_image_urls[]` (`@Element`/`@Image`) |
+
+#### Video-to-Video — 7 models
+
+| Model | ID | Duration | Resolution | Aspect ratios | Audio | Notes |
+|---|---|---|---|---|---|---|
+| Kling V3 Pro Motion Control | `kling-v3-pro-motion-control` | Auto | — | — | no | — |
+| Kling V3 Standard Motion Control | `kling-v3-standard-motion-control` | Auto | — | — | no | — |
+| HappyHorse 1.0 Edit | `happyhorse-1-0-video-to-video` | Auto | 1080p, 720p | — | yes, always on | refs ≥ 300px |
+| Grok Imagine Private | `grok-imagine-video-to-video-private` | 5–15s | 480p, 720p | — | yes, always on | prompt ≤ 4096 |
+| Topaz Video Upscale | `topaz-video-upscale` | Auto | 2x, 4x | — | no | upscale — uses `upscale_factor` |
+| Wan 2.7 Edit | `wan-2-7-video-to-video` | Auto | 1080p, 720p | — | no | — |
+| Runway Gen-4 Aleph | `runway-gen4-aleph` | 2–10s | — | 16:9, 9:16, 1:1, 4:3, 3:4, 21:9 | no | prompt ≤ 1000 |
 
 ### Parameter Details
 
 #### Model Selection Guidelines
 
-- **Text-to-Video Models**: Use for generating videos from text descriptions
-- **Image-to-Video Models**: Use for animating existing images
-- **Fast Models**: Prioritize speed over quality
-- **Full Quality Models**: Prioritize quality over speed
-- **High Resolution Models**: Use for 4K output (2160p)
-- **Audio Support**: Models with audio can generate soundtracks
+- **Text**: generate from a description alone.
+- **Image**: animate a still, or morph between a start and end frame
+  (the `-transition` models).
+- **Reference**: keep specific characters, objects or locations consistent by
+  attaching them and naming them in the prompt with `@Image1` / `@Element1`.
+- **Video**: edit, re-motion or upscale a clip you already have.
+- Within a family, *Fast* / *Turbo* / *Distilled* trade quality for speed and
+  *Full* / *Pro* / *4K* trade speed for quality.
 
 #### Duration Options
 
-- Range: 4 seconds to 30 seconds
-- Model-dependent available options
-- Common durations: 4s, 5s, 6s, 8s, 10s, 12s, 20s, 30s
+Model-dependent, ranging from 1s to 30s across the catalog. The edit and upscale
+models advertise the single literal value `Auto`, which is sent through verbatim.
+The pills only ever show what the selected model published.
 
 #### Resolution Options
 
-- 480p (SD)
-- 720p (HD)
-- 1080p (Full HD)
-- 2160p (4K)
+`360p`, `480p`, `540p`, `720p`, `1080p`, `true_1080p`, `2160p`, `4k` — again per
+model. Models advertising `2x` / `4x` are upscale models: they get Upscale Factor
+pills and the request carries `upscale_factor` instead of `resolution`. A model
+that publishes no resolutions picks its own, and none is sent.
 
 #### Aspect Ratio Options
 
-- 1:1 (Square)
-- 4:3 (Standard)
-- 16:9 (Widescreen)
-- 9:16 (Vertical)
+`1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `4:5`, `5:4`, `9:16`, `9:21`, `16:9`, `21:9`.
+The control is hidden entirely for models that publish no ratios.
 
 #### Audio Generation Support
 
-- Available on select models
-- Automatically generated based on video content
-- Cannot be customized separately
+Three distinct cases, all read from the constraints:
+
+- `audio: false` — silent output; no control shown.
+- `audio: true, audio_configurable: false` — always generates audio and rejects
+  the `audio` parameter. A note is shown instead of a toggle.
+- `audio: true, audio_configurable: true` — the toggle is shown and defaults on.
+
+Separately, `audio_input: true` models accept a background track via `audio_url`,
+and `per_reference_audio: true` models accept `reference_audio_urls`.
 
 #### Auto-Delete Feature
 
@@ -224,13 +370,30 @@ a given model is dropped automatically on retry:
 #### Reference-to-Video
 
 Reference-to-video models use character/scene references instead of a single
-starting frame:
+starting frame. On most of them the references are one flat array addressed as
+`@Image1`, `@Image2`, …:
+
+```json
+{
+  "model": "wan-2-7-reference-to-video",
+  "prompt": "@Image1 walking through a neon city, cinematic tracking shot",
+  "reference_image_urls": ["https://example.com/character.jpg"],
+  "duration": "5s"
+}
+```
+
+The Kling O3 / V3 reference models split subjects from scenery, so the app sends
+two arrays and the prompt addresses each by its own tag:
 
 ```json
 {
   "model": "kling-o3-pro-reference-to-video",
-  "prompt": "@Image1 walking through a neon city, cinematic tracking shot",
-  "reference_image_urls": ["https://example.com/character.jpg"],
+  "prompt": "@Element1 hands a lantern to @Element2 in the alley of @Image1",
+  "elements": [
+    { "frontal_image_url": "https://example.com/char-a.jpg" },
+    { "frontal_image_url": "https://example.com/char-b.jpg" }
+  ],
+  "scene_image_urls": ["https://example.com/alley.jpg"],
   "duration": "8s",
   "aspect_ratio": "16:9"
 }
@@ -304,7 +467,8 @@ All code is organized in the following files:
 - `index.html`: Main HTML structure
 - `css/milligram.min.css`: Base CSS framework
 - `css/styles.css`: Custom styling
-- `js/api.js`: Venice API integration class
+- `js/api.js`: Venice API integration class, per-model capability derivation and the self-healing request builder
+- `js/reftags.js`: the `@Image1` / `@Element1` prompt-tag engine (normalise, renumber, retarget, audit)
 - `js/app.js`: Main application logic
 - `js/components.js`: UI component functions
 - `js/utils.js`: Utility functions

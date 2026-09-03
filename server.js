@@ -261,6 +261,9 @@ function buildSystemPrompt(modelId) {
   return [
     prefix,
     'Style hint: ' + inferStyleHint(modelId) + '.',
+    // Reference tags address request-array positions. Rewording one, dropping
+    // one, or inventing a new number silently breaks the reference binding.
+    'Reference tags such as @Image1, @Image2, @Element1 are addresses into the request, not words: reproduce every tag exactly as given, keep them in the same order, and never add, remove, renumber or reword one.',
     'Return only the new prompt — no preamble, no labels, no quotes.',
   ].join(' ');
 }
