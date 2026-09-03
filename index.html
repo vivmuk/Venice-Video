@@ -31,6 +31,10 @@
                             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
                             Image
                         </button>
+                        <button class="mode-btn" data-mode="reference-to-video" onclick="switchMode('reference-to-video')">
+                            <svg viewBox="0 0 24 24" fill="none"><path d="M7 8h10M7 12h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 5a2 2 0 012-2h12a2 2 0 012 2v9a2 2 0 01-2 2H9l-5 5V5z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+                            Reference
+                        </button>
                         <button class="mode-btn" data-mode="video-to-video" onclick="switchMode('video-to-video')">
                             <svg viewBox="0 0 24 24" fill="none"><path d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                             Video
@@ -74,6 +78,7 @@
                                 <svg viewBox="0 0 24 24"><path d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
                                 Select Model
                             </h2>
+                            <input type="search" id="model-search" class="model-search" placeholder="Filter models…" oninput="handleModelSearch(this.value)" aria-label="Filter models">
                         </div>
 
                         <div id="model-grid" class="model-grid">
@@ -90,20 +95,18 @@
                                         ✨ Improve
                                     </button>
                                 </div>
+                                <div class="reftag-bar" data-target="prompt"></div>
                                 <textarea id="prompt" class="form-textarea" placeholder="A cinematic shot of a sunset over mountain peaks, golden hour lighting, smooth camera movement..." rows="3"></textarea>
                                 <div class="prompt-footer">
                                     <span id="prompt-counter" class="prompt-counter">0 / 5000</span>
                                 </div>
+                                <div class="reftag-warning" data-target="prompt"></div>
                                 <div id="prompt-error" class="field-error"></div>
                             </div>
                         </div>
 
                         <!-- Image-to-Video Input -->
                         <div id="image-input-section" class="hidden">
-                            <div id="reference-hint" class="reference-hint hidden">
-                                <svg viewBox="0 0 24 24" width="16" height="16"><path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                                <span>This is a reference-to-video model. Your image is used as a character/scene reference (sent as <code>reference_image_urls</code>).</span>
-                            </div>
                             <div class="form-section">
                                 <label class="form-label" id="image-label">Source Image</label>
                                 <div id="upload-zone" class="upload-zone" ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" onclick="document.getElementById('image-upload').click()">
@@ -129,13 +132,46 @@
                                         ✨ Improve
                                     </button>
                                 </div>
+                                <div class="reftag-bar" data-target="motion-prompt"></div>
                                 <textarea id="motion-prompt" class="form-textarea" placeholder="Gentle wind blowing through hair, subtle camera push in..." rows="2"></textarea>
+                                <div class="prompt-footer">
+                                    <span id="motion-prompt-counter" class="prompt-counter">0 / 5000</span>
+                                </div>
+                                <div class="reftag-warning" data-target="motion-prompt"></div>
+                                <div id="motion-prompt-error" class="field-error"></div>
+                            </div>
+                        </div>
+
+                        <!-- Reference-to-Video Input -->
+                        <div id="reference-input-section" class="hidden">
+                            <div class="reference-hint">
+                                <svg viewBox="0 0 24 24" width="16" height="16"><path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                <span>Each reference you drop is numbered automatically. Click its <code>@Image1</code> chip to put that tag in the prompt — however you type a tag, it is rewritten into the form the Venice reference API matches on.</span>
+                            </div>
+
+                            <div id="references-home-primary"><!-- #references-block is moved here in Reference mode --></div>
+
+                            <div class="form-section">
+                                <label class="form-label">Prompt <span class="form-label-hint">(use the @ chips to point at a reference)</span></label>
+                                <div class="prompt-improve-row">
+                                    <button type="button" class="btn-improve" id="improve-reference-btn" onclick="handleImprove('reference-prompt')" title="Polish with Venice chat">
+                                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                                        &#10024; Improve
+                                    </button>
+                                </div>
+                                <div class="reftag-bar" data-target="reference-prompt"></div>
+                                <textarea id="reference-prompt" class="form-textarea" placeholder="@Image1 walks through a neon-lit street toward @Image2, handheld tracking shot..." rows="3"></textarea>
+                                <div class="prompt-footer">
+                                    <span id="reference-prompt-counter" class="prompt-counter">0 / 5000</span>
+                                </div>
+                                <div class="reftag-warning" data-target="reference-prompt"></div>
+                                <div id="reference-prompt-error" class="field-error"></div>
                             </div>
                         </div>
 
                         <!-- Video-to-Video Input -->
                         <div id="video-input-section" class="hidden">
-                            <div id="video-reference-hint" class="reference-hint hidden">
+                            <div id="video-reference-hint" class="reference-hint">
                                 <svg viewBox="0 0 24 24" width="16" height="16"><path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                                 <span>This is a video-to-video model. Your uploaded clip is the canvas — keep the motion prompt minimal to preserve the original.</span>
                             </div>
@@ -154,6 +190,7 @@
                                     </div>
                                 </div>
                             </div>
+                            <div id="video-url-error" class="field-error"></div>
                             <div id="video-meta" class="form-label-hint" style="margin-top: var(--space-xs);"></div>
                             <div id="video-warnings" class="hidden" style="margin-top: var(--space-sm);"></div>
 
@@ -164,37 +201,54 @@
                                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                                         ✨ Improve
                                     </button>
-                                    <span class="prompt-counter" id="video-motion-counter">0</span>
                                 </div>
+                                <div class="reftag-bar" data-target="video-motion-prompt"></div>
                                 <textarea id="video-motion-prompt" class="form-textarea" placeholder="Animate the subject raising a hand toward the camera, warm dusk lighting..." rows="2"></textarea>
+                                <div class="prompt-footer">
+                                    <span id="video-motion-prompt-counter" class="prompt-counter">0 / 5000</span>
+                                </div>
+                                <div class="reftag-warning" data-target="video-motion-prompt"></div>
+                                <div id="video-motion-prompt-error" class="field-error"></div>
                             </div>
                         </div>
 
-                        <!-- Parameters -->
+                        <!-- Parameters — each section is shown only when the selected model advertises it -->
                         <div class="params-grid">
-                            <div class="form-section">
+                            <div class="form-section" id="duration-section">
                                 <label class="form-label">Duration</label>
                                 <div id="duration-pills" class="param-pills">
-                                    <!-- Populated by JS -->
+                                    <!-- Populated by JS from the model's constraints -->
                                 </div>
                             </div>
 
                             <div class="form-section" id="aspect-section">
                                 <label class="form-label">Aspect Ratio</label>
                                 <div id="aspect-pills" class="param-pills">
-                                    <!-- Populated by JS based on model constraints -->
+                                    <!-- Populated by JS from the model's constraints -->
                                 </div>
                             </div>
 
-                            <div class="form-section">
+                            <div class="form-section" id="resolution-section">
                                 <label class="form-label">Resolution</label>
                                 <div id="resolution-pills" class="param-pills">
-                                    <!-- Populated by JS -->
+                                    <!-- Populated by JS from the model's constraints -->
+                                </div>
+                            </div>
+
+                            <div class="form-section" id="upscale-section" style="display: none;">
+                                <label class="form-label">Upscale Factor <span class="form-label-hint">(replaces resolution)</span></label>
+                                <div id="upscale-pills" class="param-pills">
+                                    <!-- Populated by JS for upscale models -->
                                 </div>
                             </div>
                         </div>
 
                         <!-- Toggles -->
+                        <div id="audio-always-on" class="capability-note hidden">
+                            <svg viewBox="0 0 24 24" width="16" height="16"><path d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
+                            <span>This model always generates its own audio — there is no on/off switch for it.</span>
+                        </div>
+
                         <div id="audio-toggle" class="toggle-wrapper hidden">
                             <label class="toggle-label">
                                 <svg viewBox="0 0 24 24"><path d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
@@ -224,11 +278,11 @@
                                 Advanced options
                             </summary>
                             <div class="advanced-body">
-                                <div class="form-section">
+                                <div class="form-section" id="negative-prompt-section">
                                     <label class="form-label" for="negative-prompt">Negative Prompt <span class="form-label-hint">(what to avoid)</span></label>
                                     <textarea id="negative-prompt" class="form-textarea" placeholder="blurry, low quality, distorted, watermark..." rows="2"></textarea>
                                 </div>
-                                <div class="form-section">
+                                <div class="form-section" id="seed-section">
                                     <label class="form-label" for="seed-input">Seed <span class="form-label-hint">(optional — reuse for reproducible results)</span></label>
                                     <div class="seed-row">
                                         <input type="number" id="seed-input" class="form-input" placeholder="Random" min="0" step="1">
@@ -239,59 +293,109 @@
                                     </div>
                                 </div>
 
-                                <div class="advanced-subhead">References &amp; media <span class="form-label-hint">(model-dependent — one URL per line)</span></div>
+                                <div id="references-home-advanced">
+                                    <!-- #references-block lives here for Text / Image / Video modes and is
+                                         moved up into the Reference tab's own panel in Reference mode. -->
+                                    <div id="references-block">
+                                        <div class="advanced-subhead">References <span class="form-label-hint">— only the lanes this model accepts</span></div>
 
-                                <div class="form-section ref-input-group" data-cap="9">
-                                    <label class="form-label" for="ref-image-urls">Reference Images <span class="form-label-hint">(drop / upload faces & scenes, up to 9 — or paste URLs)</span></label>
-                                    <div class="ref-drop-zone" id="ref-image-drop-zone" onclick="document.getElementById('ref-image-drop-input').click()" ondrop="handleRefImageDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
-                                        <input type="file" id="ref-image-drop-input" accept="image/*" multiple style="display: none;" onchange="handleRefImageUpload(event)">
-                                        <p class="ref-drop-text"><strong>Drop reference images</strong> or click to upload</p>
-                                        <p class="upload-hint">PNG / JPG / WEBP — faces, scenery, characters</p>
+                                        <!-- Subjects lane — elements[], addressed as @Element1..N -->
+                                        <div class="form-section ref-lane hidden" id="lane-element">
+                                            <label class="form-label">
+                                                Subjects
+                                                <span class="form-label-hint">tagged <code>@Element1</code>… &rarr; <code>elements[]</code>, up to <span class="lane-max" id="lane-element-max">4</span></span>
+                                            </label>
+                                            <div class="ref-drop-zone" id="lane-element-drop" onclick="document.getElementById('lane-element-input').click()" ondrop="handleLaneDrop(event, 'element')" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
+                                                <input type="file" id="lane-element-input" accept="image/*" multiple style="display: none;" onchange="handleLaneUpload(event, 'element')">
+                                                <p class="ref-drop-text"><strong>Drop character / subject photos</strong> or click to upload</p>
+                                                <p class="upload-hint">One person or object per slot — each becomes <code>@Element1</code>, <code>@Element2</code>…</p>
+                                            </div>
+                                            <div id="lane-element-slots" class="ref-slots"></div>
+                                            <span id="lane-element-counter" class="form-label-hint ref-counter">0 / 4</span>
+                                        </div>
+
+                                        <!-- Images lane — reference_image_urls[] (or scene_image_urls[]), addressed as @Image1..N -->
+                                        <div class="form-section ref-lane" id="lane-image">
+                                            <label class="form-label" for="ref-image-urls">
+                                                <span id="lane-image-title">Reference Images</span>
+                                                <span class="form-label-hint">tagged <code>@Image1</code>… &rarr; <code id="lane-image-field">reference_image_urls[]</code>, up to <span class="lane-max" id="lane-image-max">9</span></span>
+                                            </label>
+                                            <div class="ref-drop-zone" id="lane-image-drop" onclick="document.getElementById('lane-image-input').click()" ondrop="handleLaneDrop(event, 'image')" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
+                                                <input type="file" id="lane-image-input" accept="image/*" multiple style="display: none;" onchange="handleLaneUpload(event, 'image')">
+                                                <p class="ref-drop-text"><strong>Drop reference images</strong> or click to upload</p>
+                                                <p class="upload-hint" id="lane-image-hint">PNG / JPG / WEBP — faces, scenery, characters</p>
+                                            </div>
+                                            <div id="lane-image-slots" class="ref-slots"></div>
+                                            <span id="lane-image-counter" class="form-label-hint ref-counter">0 / 9</span>
+                                            <details class="ref-url-details">
+                                                <summary>Paste image URLs instead</summary>
+                                                <textarea id="ref-image-urls" class="form-textarea ref-url-textarea" placeholder="One image URL per line" rows="2"></textarea>
+                                            </details>
+                                        </div>
+
+                                        <details id="ref-extra-lanes" class="ref-extra">
+                                            <summary>More reference inputs</summary>
+                                            <!-- Reference videos — reference_video_urls[] -->
+                                            <div class="form-section ref-lane" id="lane-video">
+                                                <label class="form-label" for="ref-video-urls">
+                                                    Reference Videos
+                                                    <span class="form-label-hint">motion donors &rarr; <code>reference_video_urls[]</code>, up to <span class="lane-max" id="lane-video-max">3</span></span>
+                                                </label>
+                                                <div class="ref-drop-zone" id="lane-video-drop" onclick="document.getElementById('lane-video-input').click()" ondrop="handleLaneDrop(event, 'video')" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
+                                                    <input type="file" id="lane-video-input" accept="video/mp4,video/quicktime,video/webm" multiple style="display: none;" onchange="handleLaneUpload(event, 'video')">
+                                                    <p class="ref-drop-text"><strong>Drop reference videos</strong> or click to upload</p>
+                                                    <p class="upload-hint">MP4 / MOV / WebM — motion donors</p>
+                                                </div>
+                                                <div id="lane-video-slots" class="ref-slots"></div>
+                                                <span id="lane-video-counter" class="form-label-hint ref-counter">0 / 3</span>
+                                                <details class="ref-url-details">
+                                                    <summary>Paste video URLs instead</summary>
+                                                    <textarea id="ref-video-urls" class="form-textarea ref-url-textarea" placeholder="One video URL per line" rows="2"></textarea>
+                                                </details>
+                                            </div>
+
+                                            <!-- Reference audio — reference_audio_urls[] -->
+                                            <div class="form-section ref-lane" id="lane-audio">
+                                                <label class="form-label" for="ref-audio-urls">
+                                                    Reference Audio
+                                                    <span class="form-label-hint">voice / music donors &rarr; <code>reference_audio_urls[]</code>, up to <span class="lane-max" id="lane-audio-max">3</span> — must accompany an image or video reference</span>
+                                                </label>
+                                                <div class="ref-drop-zone" id="lane-audio-drop" onclick="document.getElementById('lane-audio-input').click()" ondrop="handleLaneDrop(event, 'audio')" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
+                                                    <input type="file" id="lane-audio-input" accept="audio/mpeg,audio/wav,audio/ogg" multiple style="display: none;" onchange="handleLaneUpload(event, 'audio')">
+                                                    <p class="ref-drop-text"><strong>Drop audio refs</strong> or click to upload</p>
+                                                    <p class="upload-hint">MP3 / WAV / OGG — voice or music donors</p>
+                                                </div>
+                                                <div id="lane-audio-slots" class="ref-slots"></div>
+                                                <span id="lane-audio-counter" class="form-label-hint ref-counter">0 / 3</span>
+                                                <details class="ref-url-details">
+                                                    <summary>Paste audio URLs instead</summary>
+                                                    <textarea id="ref-audio-urls" class="form-textarea ref-url-textarea" placeholder="One audio URL per line" rows="2"></textarea>
+                                                </details>
+                                            </div>
+                                        </details>
+
+                                        <details id="saved-refs-section" class="ref-extra">
+                                            <summary>My saved refs <span class="form-label-hint">— kept in this browser, up to 50</span></summary>
+                                            <div id="saved-refs-list" class="saved-refs-list"></div>
+                                            <p id="saved-refs-empty" class="form-label-hint" style="margin-top: var(--space-sm);">
+                                                No saved refs yet. Drop a reference image / video / audio, then click the <span aria-label="save">&#128190;</span> button on its thumbnail to keep it for next time.
+                                            </p>
+                                        </details>
                                     </div>
-                                    <textarea id="ref-image-urls" class="form-textarea ref-url-textarea" data-cap="9" placeholder="https://example.com/character-front.jpg&#10;https://example.com/character-side.jpg" rows="2"></textarea>
-                                    <div id="ref-image-thumbs" class="ref-thumbs"></div>
-                                    <span id="ref-image-counter" class="form-label-hint ref-counter">0 / 9</span>
-                                </div>
-
-                                <div class="form-section ref-input-group" data-cap="3">
-                                    <label class="form-label" for="ref-video-urls">Reference Videos <span class="form-label-hint">(drop / upload clips, up to 3 — or paste URLs)</span></label>
-                                    <div class="ref-drop-zone" id="ref-video-drop-zone" onclick="document.getElementById('ref-video-drop-input').click()" ondrop="handleRefVideoDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
-                                        <input type="file" id="ref-video-drop-input" accept="video/mp4,video/quicktime,video/webm" multiple style="display: none;" onchange="handleRefVideoUpload(event)">
-                                        <p class="ref-drop-text"><strong>Drop reference videos</strong> or click to upload</p>
-                                        <p class="upload-hint">MP4 / MOV / WebM — motion donors</p>
-                                    </div>
-                                    <textarea id="ref-video-urls" class="form-textarea ref-url-textarea" data-cap="3" placeholder="https://example.com/clip.mp4" rows="2"></textarea>
-                                    <div id="ref-video-thumbs" class="ref-thumbs"></div>
-                                    <span id="ref-video-counter" class="form-label-hint ref-counter">0 / 3</span>
-                                </div>
-
-                                <div class="form-section ref-input-group" data-cap="3">
-                                    <label class="form-label" for="ref-audio-urls">Reference Audio <span class="form-label-hint">(drop / upload audio, up to 3 — must accompany an image/video ref)</span></label>
-                                    <div class="ref-drop-zone" id="ref-audio-drop-zone" onclick="document.getElementById('ref-audio-drop-input').click()" ondrop="handleRefAudioDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
-                                        <input type="file" id="ref-audio-drop-input" accept="audio/mpeg,audio/wav,audio/ogg" multiple style="display: none;" onchange="handleRefAudioUpload(event)">
-                                        <p class="ref-drop-text"><strong>Drop audio refs</strong> or click to upload</p>
-                                        <p class="upload-hint">MP3 / WAV / OGG — voice or music donors</p>
-                                    </div>
-                                    <textarea id="ref-audio-urls" class="form-textarea ref-url-textarea" data-cap="3" placeholder="https://example.com/voice.mp3" rows="2"></textarea>
-                                    <div id="ref-audio-thumbs" class="ref-thumbs"></div>
-                                    <span id="ref-audio-counter" class="form-label-hint ref-counter">0 / 3</span>
-                                </div>
-
-                                <div id="saved-refs-section" class="form-section">
-                                    <div class="advanced-subhead">My Saved Refs <span class="form-label-hint">(IndexedDB-backed — survives reloads, up to 50 entries)</span></div>
-                                    <div id="saved-refs-list" class="saved-refs-list"></div>
-                                    <p id="saved-refs-empty" class="form-label-hint" style="margin-top: var(--space-sm);">
-                                        No saved refs yet. Drop a reference image / video / audio, then click the <span aria-label="save">💾</span> button on its thumbnail to keep it for next time.
-                                    </p>
                                 </div>
 
                                 <div class="params-grid">
-                                    <div class="form-section">
-                                        <label class="form-label" for="end-image-url">End Frame Image URL <span class="form-label-hint">(transitions)</span></label>
+                                    <div class="form-section" id="end-image-section">
+                                        <label class="form-label" for="end-image-url">End Frame Image URL <span class="form-label-hint" id="end-image-hint">(transitions)</span></label>
                                         <input type="url" id="end-image-url" class="form-input" placeholder="https://example.com/end.jpg">
+                                        <div id="end-image-url-error" class="field-error"></div>
                                     </div>
-                                    <div class="form-section">
-                                        <label class="form-label" for="ref-video-duration">Reference Video Duration <span class="form-label-hint">(seconds, Seedance)</span></label>
+                                    <div class="form-section" id="audio-url-section">
+                                        <label class="form-label" for="audio-url">Audio Track URL <span class="form-label-hint">(background music &rarr; <code>audio_url</code>)</span></label>
+                                        <input type="url" id="audio-url" class="form-input" placeholder="https://example.com/track.mp3">
+                                    </div>
+                                    <div class="form-section" id="ref-video-duration-section">
+                                        <label class="form-label" for="ref-video-duration">Reference Video Duration <span class="form-label-hint">(seconds)</span></label>
                                         <input type="number" id="ref-video-duration" class="form-input" placeholder="e.g. 5" min="1" step="1">
                                     </div>
                                 </div>
@@ -389,6 +493,7 @@
 
     <script src="js/state.js"></script>
     <script src="js/utils.js"></script>
+    <script src="js/reftags.js"></script>
     <script src="js/api.js"></script>
     <script src="js/app.js"></script>
 </body>

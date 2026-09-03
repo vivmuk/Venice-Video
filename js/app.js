@@ -1,30 +1,68 @@
 // Venice Video Generator - Main Application
 
-// Model Data - loaded from Venice API
+// Model Data - loaded from Venice API, one bucket per tab.
 let MODELS = {
   'text-to-video': [],
   'image-to-video': [],
+  'reference-to-video': [],
   'video-to-video': []
+};
+
+// Venice input mode -> tab. Reference-to-video gets its own tab rather than
+// being folded into Image, because its inputs and prompt syntax differ.
+const MODE_BY_INPUT = {
+  text: 'text-to-video',
+  image: 'image-to-video',
+  reference: 'reference-to-video',
+  video: 'video-to-video'
+};
+
+// The prompt textarea each tab writes into.
+const PROMPT_FIELD = {
+  'text-to-video': 'prompt',
+  'image-to-video': 'motion-prompt',
+  'reference-to-video': 'reference-prompt',
+  'video-to-video': 'video-motion-prompt'
+};
+
+const MODE_TITLE = {
+  'text-to-video': 'text-to-video',
+  'image-to-video': 'image-to-video',
+  'reference-to-video': 'reference-to-video',
+  'video-to-video': 'video-to-video'
+};
+
+// The four reference lanes. `tag` names the prompt tag kind the lane is
+// addressed by (null = the lane has no @ syntax).
+const LANES = {
+  element: { accept: 'image', tag: 'element', urlField: null },
+  image:   { accept: 'image', tag: 'image',   urlField: 'ref-image-urls' },
+  video:   { accept: 'video', tag: null,      urlField: 'ref-video-urls' },
+  audio:   { accept: 'audio', tag: null,      urlField: 'ref-audio-urls' }
 };
 
 // App State
 const appState = {
   mode: 'text-to-video',
   selectedModel: null,
+  caps: null,               // VeniceAPI.capabilities() for the selected model
   uploadedImage: null,
   uploadedImageUrl: null,
   uploadedVideoBlob: null,
   uploadedVideoUrl: null,
   uploadedVideoDuration: null,
   uploadedVideoIsVertical: null,
-  uploadedRefs: { image: [], video: [], audio: [] }, // host URLs of uploaded files
-  uploadedRefsFiles: { image: [], video: [], audio: [] }, // parallel blobs (for save-to-library)
+  // Reference lanes. Order is meaningful: slot i is addressed as @Image<i+1>.
+  refSlots: { element: [], image: [], video: [], audio: [] },
+  modelFilter: '',
+  showAllModels: false,   // the full list stays folded until asked for
   isProcessing: false,
   queueId: null,
   videoUrl: null,
   videoBlob: null, // Store the blob for download
   selectedDuration: null,
   selectedResolution: null,
+  selectedUpscaleFactor: null,
   selectedAspectRatio: '16:9',
   modelsLoaded: false,
   customApiKey: null // User's custom API key (if server key expired)
@@ -39,8 +77,11 @@ async function initializeApp() {
   // Initialize custom API key from localStorage
   initializeApiKey();
 
-  // Setup prompt counter
-  setupPromptCounter();
+  // Setup prompt counters + tag normalisation on every prompt field
+  setupPromptFields();
+
+  // Keep the pasted-URL textareas and the numbered slots in sync
+  setupRefUrlTextareas();
 
   // Setup global error handlers
   window.addEventListener('error', (e) => {
@@ -63,8 +104,45 @@ async function initializeApp() {
 
   // Render initial models
   renderModels();
+  applyCapabilities(null);
 
   console.log('Venice Video Generator initialized');
+}
+
+// A short badge for the model card, derived from the model's own name/id.
+function deriveBadge(modelId, name) {
+  const s = (name + ' ' + modelId).toLowerCase();
+  if (/\bturbo\b|\bfast\b|\bflash\b|distilled/.test(s)) return 'fast';
+  if (/\bfull\b|\bquality\b/.test(s)) return 'full';
+  if (/\bpro\b|\b4k\b/.test(s)) return 'pro';
+  return null;
+}
+
+// "5s".."15s" -> "5–15s"; the literal 'Auto' is passed through untouched.
+function formatDurationRange(durations) {
+  const list = durations.map(String);
+  if (list.length === 1) return list[0].toLowerCase() === 'auto' ? 'Auto' : list[0];
+  const numeric = list.filter((d) => /^\d+s$/i.test(d)).map((d) => parseInt(d, 10));
+  const hasAuto = list.some((d) => d.toLowerCase() === 'auto');
+  if (!numeric.length) return hasAuto ? 'Auto' : list.join('/');
+  const span = numeric.length > 2
+    ? `${Math.min(...numeric)}–${Math.max(...numeric)}s`
+    : numeric.join('/') + 's';
+  return hasAuto ? span + ' / Auto' : span;
+}
+
+// One-line capability summary shown under the model name.
+function modelSummary(model) {
+  const caps = model.caps;
+  const bits = [];
+  if (caps.durations.length) {
+    bits.push(formatDurationRange(caps.durations));
+  }
+  if (caps.isUpscale) bits.push(caps.upscaleFactors.map((f) => f + 'x').join('/'));
+  else if (caps.resolutions.length) bits.push(caps.resolutions[caps.resolutions.length - 1]);
+  if (caps.producesAudio) bits.push('audio');
+  if (caps.elementLane) bits.push('@elements');
+  return bits.join(' · ');
 }
 
 // Load models from API
@@ -73,112 +151,73 @@ async function loadModels(token) {
     appState.apiToken = token;
     const api = new VeniceAPI(token);
     const models = await api.getModels();
-    
-    // Parse models and organize by type
-    MODELS['text-to-video'] = [];
-    MODELS['image-to-video'] = [];
-    
+
+    Object.keys(MODELS).forEach((k) => { MODELS[k] = []; });
+
     console.log('API returned', models.length, 'models');
-    
-    models.forEach(model => {
-      const constraints = model.model_spec?.constraints || {};
-      const name = model.model_spec?.name || model.id;
+
+    models.forEach((model) => {
+      const spec = model.model_spec || {};
+      const constraints = spec.constraints || {};
       const modelId = model.id || '';
-      
-      // Get model_type from constraints - this is the reliable source
-      const modelType = constraints.model_type;
-      
-      // Skip if no model_type (not a proper video model)
-      if (!modelType) {
+
+      // Skip anything that isn't a proper video model.
+      if (!modelId || !constraints.model_type) {
         console.log('Skipping model without model_type:', modelId);
         return;
       }
-      
-      // Extract badge from name or id
-      let badge = null;
-      const nameLower = name.toLowerCase();
-      const idLower = modelId.toLowerCase();
-      if (nameLower.includes('fast') || idLower.includes('fast')) {
-        badge = 'fast';
-      } else if (nameLower.includes('full') || idLower.includes('full')) {
-        badge = 'full';
-      } else if (nameLower.includes('pro') || idLower.includes('pro')) {
-        badge = 'pro';
-      } else if (nameLower.includes('turbo') || idLower.includes('turbo')) {
-        badge = 'fast';
-      }
-      
-      // Parse durations (convert "5s" to 5)
-      const durations = (constraints.durations || []).map(d => {
-        if (typeof d === 'string') {
-          return parseInt(d.replace('s', ''));
-        }
-        return d;
+
+      // Every parameter decision downstream reads from this one object.
+      const caps = VeniceAPI.capabilities(modelId, constraints);
+      const bucket = MODE_BY_INPUT[caps.mode];
+      if (!bucket) return;
+
+      const name = spec.name || modelId;
+      MODELS[bucket].push({
+        id: modelId,
+        name,
+        badge: deriveBadge(modelId, name),
+        sets: spec.model_sets || [],
+        caps,
+        constraints,
+        durations: caps.durations,
+        resolutions: caps.resolutions,
+        aspectRatios: caps.aspectRatios,
+        audio: caps.producesAudio,
+        inputMode: caps.mode,
+        requiresReference: caps.mode === 'reference',
+        offline: spec.offline || false,
+        recommended: VeniceAPI.isRecommended(model),
+        rank: VeniceAPI.releaseRank(model)
       });
-      
-      // Get resolutions
-      const resolutions = constraints.resolutions || [];
-      
-      // Get aspect ratios
-      const aspectRatios = constraints.aspect_ratios || [];
-      
-      // Audio support
-      const audio = constraints.audio || false;
-      
-      // Determine how the model consumes visual input (text / image / reference / video).
-      const inputMode = (typeof VeniceAPI !== 'undefined' && VeniceAPI.inputMode)
-        ? VeniceAPI.inputMode(modelId, constraints)
-        : (modelType || 'text').replace('-to-video', '');
-
-      const modelData = {
-        id: model.id,
-        name: name,
-        badge: badge,
-        durations: durations,
-        resolutions: resolutions,
-        aspectRatios: aspectRatios,
-        audio: audio,
-        constraints: constraints,
-        inputMode: inputMode,
-        requiresReference: inputMode === 'reference',
-        offline: model.model_spec?.offline || false
-      };
-
-      // Categorize model. 4 buckets now: text-to-video, image-to-video (incl.
-      // reference-to-video), video-to-video (incl. upscale), and an H2V
-      // placeholder if any show up.
-      if (inputMode === 'text' || modelType === 'text-to-video') {
-        MODELS['text-to-video'].push(modelData);
-      } else if (inputMode === 'image' || inputMode === 'reference') {
-        MODELS['image-to-video'].push(modelData);
-      } else if (inputMode === 'video') {
-        MODELS['video-to-video'].push(modelData);
-      }
-      // Anything else (future H2V etc.) is not surfaced.
     });
-    
-    // Log model counts for debugging
-    console.log('Models loaded from API:', {
-      'text-to-video': MODELS['text-to-video'].length,
-      'image-to-video': MODELS['image-to-video'].length
+
+    // Newest first within every tab, so the top of each list is the most
+    // recent model Venice shipped for that category.
+    Object.keys(MODELS).forEach((k) => {
+      MODELS[k].sort((a, b) => (b.rank - a.rank) || a.name.localeCompare(b.name));
     });
-    
+
+    console.log('Models loaded from API:', Object.fromEntries(
+      Object.keys(MODELS).map((k) => [k, MODELS[k].length])
+    ));
+
     appState.modelsLoaded = true;
-    
-    // Render models for current mode
     renderModels();
-    
-    // Show success message if models were loaded
-    const totalModels = MODELS['text-to-video'].length + MODELS['image-to-video'].length;
-    if (totalModels > 0) {
-      showToast(`Loaded ${MODELS['text-to-video'].length} text-to-video and ${MODELS['image-to-video'].length} image-to-video models`, 'success');
+
+    const total = Object.values(MODELS).reduce((n, list) => n + list.length, 0);
+    if (total > 0) {
+      const counts = Object.keys(MODELS)
+        .map((k) => `${MODELS[k].length} ${k.replace('-to-video', '')}`)
+        .join(' · ');
+      showToast(`Loaded ${total} video models — ${counts}`, 'success');
     }
   } catch (error) {
     console.error('Error loading models from API:', error);
     appState.modelsLoaded = false;
     renderModels();
-    
-    const errorMsg = token 
+
+    const errorMsg = token
       ? 'Failed to load models. Please check your API key.'
       : 'Failed to load models. Please enter your API key.';
     showToast(errorMsg, 'error');
@@ -270,88 +309,280 @@ function removeVideo(e) {
   if (inp) inp.value = '';
 }
 
-function appendRef(url, targetId, thumbsId, counterId, max, kind, file) {
-  const ta = document.getElementById(targetId);
+// ----- Reference lanes -------------------------------------------------
+//
+// Each lane holds an ordered list of { url, file }. The order is the whole
+// point: slot i is what the prompt addresses as "@Image<i+1>" and what lands
+// at index i of the request array, so adding, removing and renumbering all
+// have to stay in lockstep with the prompt text.
+
+// How many slots the selected model accepts in a lane. 0 hides the lane.
+function laneMax(lane) {
+  const caps = appState.caps;
+  if (!caps) return lane === 'image' ? 9 : 0;
+  if (lane === 'element') return caps.elementLane ? caps.elementLane.max : 0;
+  if (lane === 'image') return caps.imageLane.max;
+  if (lane === 'video') return caps.maxReferenceVideos || 0;
+  if (lane === 'audio') return caps.maxReferenceAudio || 0;
+  return 0;
+}
+
+// The canonical tag for a slot, e.g. "@Image2". Null on untagged lanes.
+function laneTag(lane, index) {
+  const kind = LANES[lane].tag;
+  return kind ? RefTags.label(kind, index + 1) : null;
+}
+
+function addToLane(lane, url, file) {
+  const slots = appState.refSlots[lane];
+  if (slots.some((s) => s.url === url)) return false;
+  const max = laneMax(lane);
+  if (slots.length >= max) {
+    showToast(`${lane} references are capped at ${max} for this model`, 'warning');
+    return false;
+  }
+  slots.push({ url, file: file || null });
+  syncLaneTextarea(lane);
+  renderLane(lane);
+  refreshTagUI();
+  return true;
+}
+
+// Remove slot `index` and shift every later tag down by one, so a prompt that
+// said "@Image3" still points at the same picture after @Image2 is deleted.
+function removeFromLane(lane, index) {
+  const slots = appState.refSlots[lane];
+  if (index < 0 || index >= slots.length) return;
+  const before = slots.length;
+  slots.splice(index, 1);
+
+  const kind = LANES[lane].tag;
+  if (kind) {
+    const mapping = {};
+    for (let i = 1; i <= before; i++) {
+      mapping[i] = i < index + 1 ? i : (i === index + 1 ? null : i - 1);
+    }
+    remapPromptTags(kind, mapping);
+  }
+
+  syncLaneTextarea(lane);
+  renderLane(lane);
+  refreshTagUI();
+}
+
+// Rewrite the tags of one kind across every prompt field.
+function remapPromptTags(kind, mapping) {
+  Object.values(PROMPT_FIELD).forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el || !el.value) return;
+    const next = RefTags.remap(el.value, kind, mapping);
+    if (next !== el.value) {
+      el.value = next;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  });
+}
+
+// Mirror the slot list back into the lane's "paste URLs" textarea.
+let syncingLane = false;
+function syncLaneTextarea(lane) {
+  const id = LANES[lane].urlField;
+  if (!id) return;
+  const ta = document.getElementById(id);
   if (!ta) return;
-  const lines = ta.value.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
-  if (lines.includes(url)) return;
-  if (lines.length >= max) {
-    showToast('Ref cap (' + max + ') reached - extra drop ignored', 'warning');
+  syncingLane = true;
+  ta.value = appState.refSlots[lane].map((s) => s.url).join('\n');
+  syncingLane = false;
+}
+
+// …and the other way: typing/pasting URLs rebuilds the slots, keeping any
+// blob we already hold for a URL that survived the edit.
+function setupRefUrlTextareas() {
+  Object.keys(LANES).forEach((lane) => {
+    const id = LANES[lane].urlField;
+    if (!id) return;
+    const ta = document.getElementById(id);
+    if (!ta) return;
+    ta.addEventListener('change', () => {
+      if (syncingLane) return;
+      const urls = ta.value.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean).slice(0, laneMax(lane));
+      const known = new Map(appState.refSlots[lane].map((s) => [s.url, s.file]));
+      appState.refSlots[lane] = urls.map((u) => ({ url: u, file: known.get(u) || null }));
+      syncLaneTextarea(lane);
+      renderLane(lane);
+      refreshTagUI();
+    });
+  });
+}
+
+function renderLane(lane) {
+  const container = document.getElementById('lane-' + lane + '-slots');
+  if (!container) return;
+  const slots = appState.refSlots[lane];
+  const max = laneMax(lane);
+
+  container.innerHTML = '';
+  slots.forEach((slot, i) => {
+    const chip = document.createElement('div');
+    chip.className = 'ref-slot';
+
+    const media = document.createElement('div');
+    media.className = 'ref-slot-media';
+    if (LANES[lane].accept === 'image') {
+      media.innerHTML = '<img src="' + escapeAttr(slot.url) + '" alt="reference ' + (i + 1) + '" loading="lazy">';
+    } else if (LANES[lane].accept === 'video') {
+      media.innerHTML = '<video src="' + escapeAttr(slot.url) + '" muted playsinline preload="metadata"></video>';
+    } else {
+      media.innerHTML = '<div class="ref-thumb-icon" title="' + escapeAttr(slot.url) + '">AUDIO</div>';
+    }
+    chip.appendChild(media);
+
+    // The tag badge doubles as the insert button — this is how a reference
+    // gets into the prompt without anyone typing "@Image1" by hand.
+    const tag = laneTag(lane, i);
+    const caption = document.createElement('button');
+    caption.type = 'button';
+    caption.className = 'ref-slot-tag' + (tag ? '' : ' ref-slot-tag-plain');
+    caption.textContent = tag || String(i + 1);
+    if (tag) {
+      caption.title = 'Insert ' + tag + ' into the prompt';
+      caption.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        insertTagIntoPrompt(tag);
+      });
+    } else {
+      caption.disabled = true;
+      caption.title = 'Reference ' + (i + 1);
+    }
+    chip.appendChild(caption);
+
+    if (slot.file) {
+      const saveBtn = document.createElement('button');
+      saveBtn.type = 'button';
+      saveBtn.className = 'ref-thumb-save';
+      saveBtn.title = 'Save to library (persistent)';
+      saveBtn.textContent = '\u{1F4BE}';
+      saveBtn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        downloadRefToLibrary(LANES[lane].accept, slot.file, slot.url);
+      });
+      chip.appendChild(saveBtn);
+    }
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'ref-thumb-remove';
+    removeBtn.title = 'Remove' + (tag ? ' — later tags are renumbered automatically' : '');
+    removeBtn.innerHTML = '×';
+    removeBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      removeFromLane(lane, i);
+    });
+    chip.appendChild(removeBtn);
+
+    container.appendChild(chip);
+  });
+
+  // A lane that already holds references shrinks its drop zone to a strip.
+  const laneEl = document.getElementById('lane-' + lane);
+  if (laneEl) laneEl.classList.toggle('has-slots', slots.length > 0);
+
+  const counter = document.getElementById('lane-' + lane + '-counter');
+  if (counter) {
+    counter.textContent = slots.length + ' / ' + max + (slots.length >= max && max > 0 ? ' (cap reached)' : '');
+  }
+}
+
+function renderAllLanes() {
+  Object.keys(LANES).forEach(renderLane);
+}
+
+// Insert a tag at the caret of the prompt field for the current tab.
+function insertTagIntoPrompt(tag) {
+  const el = document.getElementById(PROMPT_FIELD[appState.mode]);
+  if (!el || el.disabled) {
+    showToast('This model takes no prompt, so reference tags have nowhere to go', 'warning');
     return;
   }
-  lines.push(url);
-  ta.value = lines.join('\n');
-  if (counterId) updateRefCounter(counterId, lines.length, max);
-  const thumbs = document.getElementById(thumbsId);
-  if (!thumbs) return;
-  const chip = document.createElement('div');
-  chip.className = 'ref-thumb';
-  if (/image/.test(thumbsId)) {
-    chip.innerHTML = '<img src="' + url + '" alt="ref" loading="lazy">';
-  } else if (/video/.test(thumbsId)) {
-    chip.innerHTML = '<video src="' + url + '" muted playsinline preload="metadata"></video>';
-  } else {
-    chip.innerHTML = '<div class="ref-thumb-icon" title="' + url + '">AUDIO</div>';
-  }
-  // Save-to-library button (only if we have the blob)
-  if (file) {
-    const saveBtn = document.createElement('button');
-    saveBtn.type = 'button';
-    saveBtn.className = 'ref-thumb-save';
-    saveBtn.title = 'Save to library (persistent)';
-    saveBtn.textContent = '\u{1F4BE}';
-    saveBtn.addEventListener('click', (ev) => {
-      ev.preventDefault();
-      downloadRefToLibrary(kind, file, url);
+  RefTags.insertAtCursor(el, tag);
+}
+
+// Rebuild the @-chip bars and the "tag points at nothing" warnings.
+function refreshTagUI() {
+  const caps = appState.caps;
+  const chips = [];
+  if (caps && caps.elementLane) {
+    appState.refSlots.element.forEach((slot, i) => {
+      chips.push({ kind: 'element', tag: RefTags.label('element', i + 1), url: slot.url, media: 'image' });
     });
-    chip.appendChild(saveBtn);
   }
-  // Remove button
-  const removeBtn = document.createElement('button');
-  removeBtn.type = 'button';
-  removeBtn.className = 'ref-thumb-remove';
-  removeBtn.title = 'Remove';
-  removeBtn.innerHTML = '\u00d7';
-  removeBtn.addEventListener('click', (ev) => {
-    ev.preventDefault();
-    const cur = ta.value.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
-    const next = cur.filter((u) => u !== url);
-    ta.value = next.join('\n');
-    if (counterId) updateRefCounter(counterId, next.length, max);
-    if (kind) {
-      if (appState.uploadedRefs[kind]) appState.uploadedRefs[kind] = appState.uploadedRefs[kind].filter((u) => u !== url);
-      if (appState.uploadedRefsFiles[kind]) appState.uploadedRefsFiles[kind] = appState.uploadedRefsFiles[kind].filter((x) => x.url !== url);
-    }
-    chip.remove();
+  appState.refSlots.image.forEach((slot, i) => {
+    chips.push({ kind: 'image', tag: RefTags.label('image', i + 1), url: slot.url, media: 'image' });
   });
-  chip.appendChild(removeBtn);
-  thumbs.appendChild(chip);
-}
 
-function updateRefCounter(counterId, current, max) {
-  const el = document.getElementById(counterId);
-  if (!el) return;
-  el.textContent = current + ' / ' + max + (current >= max ? ' (cap reached)' : '');
-}
-
-async function uploadAndAppend(files, kind) {
-  const map = {
-    image: { target: 'ref-image-urls', thumbs: 'ref-image-thumbs', counter: 'ref-image-counter', max: 9, key: 'image' },
-    video: { target: 'ref-video-urls', thumbs: 'ref-video-thumbs', counter: 'ref-video-counter', max: 3, key: 'video' },
-    audio: { target: 'ref-audio-urls', thumbs: 'ref-audio-thumbs', counter: 'ref-audio-counter', max: 3, key: 'audio' },
+  const counts = {
+    image: appState.refSlots.image.length,
+    element: (caps && caps.elementLane) ? appState.refSlots.element.length : 0
   };
-  const m = map[kind];
-  if (!m) return;
-  const remaining = m.max - appState.uploadedRefs[m.key].length;
+
+  document.querySelectorAll('.reftag-bar').forEach((bar) => {
+    const targetId = bar.dataset.target;
+    const target = document.getElementById(targetId);
+    bar.innerHTML = '';
+    if (!chips.length || !target || target.disabled) {
+      bar.classList.add('hidden');
+      return;
+    }
+    bar.classList.remove('hidden');
+
+    const lead = document.createElement('span');
+    lead.className = 'reftag-lead';
+    lead.textContent = 'Insert:';
+    bar.appendChild(lead);
+
+    chips.forEach((chip) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'reftag-chip';
+      btn.title = 'Insert ' + chip.tag + ' into this prompt';
+      btn.innerHTML = '<img src="' + escapeAttr(chip.url) + '" alt="" loading="lazy"><span>' + escapeHTML(chip.tag) + '</span>';
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        const el = document.getElementById(targetId);
+        if (el && !el.disabled) RefTags.insertAtCursor(el, chip.tag);
+      });
+      bar.appendChild(btn);
+    });
+  });
+
+  document.querySelectorAll('.reftag-warning').forEach((box) => {
+    const el = document.getElementById(box.dataset.target);
+    const report = RefTags.audit(el ? el.value : '', counts);
+    if (!report.dangling.length) {
+      box.textContent = '';
+      box.classList.remove('visible');
+      return;
+    }
+    const list = report.dangling.map((d) => RefTags.label(d.kind, d.n)).join(', ');
+    box.textContent = `${list} ${report.dangling.length > 1 ? 'point' : 'points'} at a slot you haven't filled — attach that reference or remove the tag.`;
+    box.classList.add('visible');
+  });
+}
+
+async function uploadIntoLane(files, lane) {
+  const max = laneMax(lane);
+  if (max === 0) {
+    showToast('The selected model does not accept this kind of reference', 'warning');
+    return;
+  }
+  const remaining = max - appState.refSlots[lane].length;
   const capped = Array.from(files).slice(0, Math.max(0, remaining));
-  if (capped.length < files.length) showToast('Cap (' + m.max + ') reached; some files skipped', 'warning');
+  if (capped.length < files.length) showToast('Cap (' + max + ') reached; some files skipped', 'warning');
   for (const f of capped) {
     try {
       showLoading('Uploading ' + f.name + '...');
       const url = await uploadFile(f);
-      appState.uploadedRefs[m.key].push(url);
-      appState.uploadedRefsFiles[m.key].push({ url, file: f });
-      appendRef(url, m.target, m.thumbs, m.counter, m.max, m.key, f);
+      addToLane(lane, url, f);
       hideLoading();
     } catch (err) {
       hideLoading();
@@ -361,38 +592,17 @@ async function uploadAndAppend(files, kind) {
   }
 }
 
-async function handleRefImageUpload(e) { await uploadAndAppend(e.target.files, 'image'); e.target.value = ''; }
-function handleRefImageDrop(e) {
-  e.preventDefault(); e.stopPropagation();
-  document.getElementById('ref-image-drop-zone')?.classList.remove('drag-over');
-  const dt = new DataTransfer();
-  for (const f of (e.dataTransfer.files || [])) dt.items.add(f);
-  const input = document.getElementById('ref-image-drop-input');
-  if (!input) return;
-  input.files = dt.files;
-  handleRefImageUpload({ target: input });
+async function handleLaneUpload(e, lane) {
+  await uploadIntoLane(e.target.files, lane);
+  e.target.value = '';
 }
-async function handleRefVideoUpload(e) { await uploadAndAppend(e.target.files, 'video'); e.target.value = ''; }
-function handleRefVideoDrop(e) {
-  e.preventDefault(); e.stopPropagation();
-  document.getElementById('ref-video-drop-zone')?.classList.remove('drag-over');
-  const dt = new DataTransfer();
-  for (const f of (e.dataTransfer.files || [])) dt.items.add(f);
-  const input = document.getElementById('ref-video-drop-input');
-  if (!input) return;
-  input.files = dt.files;
-  handleRefVideoUpload({ target: input });
-}
-async function handleRefAudioUpload(e) { await uploadAndAppend(e.target.files, 'audio'); e.target.value = ''; }
-function handleRefAudioDrop(e) {
-  e.preventDefault(); e.stopPropagation();
-  document.getElementById('ref-audio-drop-zone')?.classList.remove('drag-over');
-  const dt = new DataTransfer();
-  for (const f of (e.dataTransfer.files || [])) dt.items.add(f);
-  const input = document.getElementById('ref-audio-drop-input');
-  if (!input) return;
-  input.files = dt.files;
-  handleRefAudioUpload({ target: input });
+
+function handleLaneDrop(e, lane) {
+  e.preventDefault();
+  e.stopPropagation();
+  const zone = document.getElementById('lane-' + lane + '-drop');
+  if (zone) zone.classList.remove('drag-over');
+  uploadIntoLane(e.dataTransfer.files || [], lane);
 }
 
 async function handleImprove(fieldId) {
@@ -579,15 +789,13 @@ async function loadSavedRef(r) {
     let url = r.url;
     if (!url && r.file) url = await uploadFile(r.file);
     if (!url) throw new Error('No file or URL available for this reference');
-    const map = {
-      image: ['ref-image-urls', 'ref-image-thumbs', 'ref-image-counter', 9],
-      video: ['ref-video-urls', 'ref-video-thumbs', 'ref-video-counter', 3],
-      audio: ['ref-audio-urls', 'ref-audio-thumbs', 'ref-audio-counter', 3],
-    };
-    const entry = map[r.kind] || map.image;
-    appendRef(url, entry[0], entry[1], entry[2], entry[3], r.kind, r.file);
+    // Images go into the tagged lane so the reference is immediately
+    // addressable as @Image<n>; videos and audio into their own lanes.
+    const lane = r.kind === 'video' ? 'video' : (r.kind === 'audio' ? 'audio' : 'image');
+    const added = addToLane(lane, url, r.file);
     hideLoading();
-    showToast('Loaded "' + r.name + '"', 'success');
+    if (added) showToast('Loaded "' + r.name + '" as ' + (laneTag(lane, appState.refSlots[lane].length - 1) || 'a reference'), 'success');
+    else showToast('"' + r.name + '" is already attached', 'info');
   } catch (err) {
     hideLoading();
     showToast('Load failed: ' + err.message, 'error');
@@ -606,121 +814,272 @@ async function removeSavedRef(r) {
 
 // Mode Switching
 function switchMode(mode) {
+  if (!MODELS[mode]) return;
   appState.mode = mode;
   appState.selectedModel = null;
+  appState.caps = null;
 
-  // Update mode buttons
-  document.querySelectorAll('.mode-btn').forEach(btn => {
+  document.querySelectorAll('.mode-btn').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.mode === mode);
   });
 
-  // Show/hide input sections
   document.getElementById('text-input-section').classList.toggle('hidden', mode !== 'text-to-video');
   document.getElementById('image-input-section').classList.toggle('hidden', mode !== 'image-to-video');
+  document.getElementById('reference-input-section').classList.toggle('hidden', mode !== 'reference-to-video');
   document.getElementById('video-input-section').classList.toggle('hidden', mode !== 'video-to-video');
 
-  // Render models for this mode
-  renderModels();
+  // References are first-class in the Reference tab and tucked into Advanced
+  // everywhere else — the same block, just re-homed.
+  const block = document.getElementById('references-block');
+  const home = document.getElementById(
+    mode === 'reference-to-video' ? 'references-home-primary' : 'references-home-advanced'
+  );
+  if (block && home && block.parentElement !== home) home.appendChild(block);
 
-  // Reset selected model info
-  document.getElementById('selected-model-info').innerHTML = '<p class="select-hint">Select a model above to begin</p>';
+  const search = document.getElementById('model-search');
+  if (search) {
+    search.value = '';
+    search.placeholder = `Filter ${MODELS[mode].length} ${MODE_TITLE[mode]} models…`;
+  }
+  appState.modelFilter = '';
+  appState.showAllModels = false;
+
+  renderModels();
+  applyCapabilities(null);
+
+  document.getElementById('selected-model-info').innerHTML =
+    '<p class="select-hint">Select a model above to begin</p>';
+}
+
+function toggleAllModels() {
+  appState.showAllModels = !appState.showAllModels;
+  renderModels();
+}
+
+function handleModelSearch(value) {
+  appState.modelFilter = (value || '').trim().toLowerCase();
+  renderModels();
+}
+
+function modelMatchesFilter(model, filter) {
+  if (!filter) return true;
+  const haystack = (model.name + ' ' + model.id + ' ' + (model.sets || []).join(' ')).toLowerCase();
+  return filter.split(/\s+/).every((term) => haystack.includes(term));
+}
+
+// The 2–3 models pinned to the top of a tab: Venice's own recommended /
+// featured picks, newest first. If Venice flags fewer than two for a category,
+// the newest remaining models fill the row so the section is never a lone card.
+function pickRecommended(models) {
+  const picks = models.filter((m) => m.recommended && !m.offline).slice(0, 3);
+  if (picks.length >= 2) return picks;
+  const filler = models.filter((m) => !picks.includes(m) && !m.offline).slice(0, 2 - picks.length);
+  return picks.concat(filler);
+}
+
+function modelCardHTML(model, isNewest) {
+  const badges = [];
+  if (isNewest) badges.push('<span class="model-badge new">New</span>');
+  if (model.badge) badges.push(`<span class="model-badge ${model.badge}">${model.badge}</span>`);
+  if (model.offline) badges.push('<span class="model-badge offline">Off</span>');
+  const summary = modelSummary(model);
+  return `
+      <div class="model-card" data-model-id="${escapeAttr(model.id)}" onclick="selectModel('${escapeAttr(model.id)}')" title="${escapeAttr(model.id)}">
+        <div class="model-header">
+          <span class="model-name">${escapeHTML(model.name)}</span>
+          ${badges.join('')}
+        </div>
+        ${summary ? `<div class="model-meta">${escapeHTML(summary)}</div>` : ''}
+      </div>`;
 }
 
 // Render Models
 function renderModels() {
   const grid = document.getElementById('model-grid');
-  const models = MODELS[appState.mode] || [];
-  const allModes = ['text-to-video', 'image-to-video', 'video-to-video'];
+  const all = MODELS[appState.mode] || [];
+  const allModes = Object.keys(MODELS);
   const totalModelsCount = allModes.reduce((n, m) => n + (MODELS[m]?.length || 0), 0);
-  const otherModes = allModes.filter((m) => m !== appState.mode);
-  const otherModelsCount = otherModes.reduce((n, m) => n + (MODELS[m]?.length || 0), 0);
-  const otherModeNames = otherModes.filter((m) => (MODELS[m]?.length || 0) > 0)
-                                   .map((m) => m.replace(/-/g, ' '))
-                                   .join(', ');
+  const otherModeNames = allModes
+    .filter((m) => m !== appState.mode && (MODELS[m]?.length || 0) > 0)
+    .map((m) => m.replace(/-to-video$/, ''))
+    .join(', ');
 
-  if (models.length === 0) {
-    let message = '';
+  if (all.length === 0) {
+    let message;
     if (totalModelsCount === 0) {
-      // No models loaded at all
       message = `
         <p style="margin-bottom: var(--space-md);">No models available. Please enter your API key to load models.</p>
         <p style="font-size: 0.9rem;">Click the key icon in the header to add your Venice API key.</p>
       `;
-    } else if (otherModelsCount > 0) {
-      const modeDisplay = appState.mode.replace(/-/g, ' ');
+    } else if (otherModeNames) {
       message = `
-        <p style="margin-bottom: var(--space-md);">No ${modeDisplay} models available.</p>
-        <p style="font-size: 0.9rem;">Switch to ${otherModeNames} mode to see them.</p>
+        <p style="margin-bottom: var(--space-md);">No ${MODE_TITLE[appState.mode]} models available.</p>
+        <p style="font-size: 0.9rem;">Switch to ${escapeHTML(otherModeNames)} to see the models you do have.</p>
       `;
     } else {
-      // Models loaded but none for this mode
-      const modeDisplay = appState.mode.replace(/-/g, ' ');
       message = `
-        <p style="margin-bottom: var(--space-md);">No ${modeDisplay} models found.</p>
-        <p style="font-size: 0.9rem;">Your API key may not have access to ${modeDisplay} models.</p>
+        <p style="margin-bottom: var(--space-md);">No ${MODE_TITLE[appState.mode]} models found.</p>
+        <p style="font-size: 0.9rem;">Your API key may not have access to ${MODE_TITLE[appState.mode]} models.</p>
       `;
     }
-    
-    grid.innerHTML = `
-      <div style="grid-column: 1 / -1; text-align: center; padding: var(--space-xl); color: var(--text-muted);">
-        ${message}
-      </div>
-    `;
+    grid.innerHTML = `<div class="model-grid-message">${message}</div>`;
     return;
   }
 
-  grid.innerHTML = models.map(model => {
-    const offlineBadge = model.offline ? '<span class="model-badge" style="background:var(--error);">Off</span>' : '';
-    const badge = model.badge ? `<span class="model-badge ${model.badge}">${model.badge}</span>` : '';
-    return `
-      <div class="model-card" data-model-id="${model.id}" onclick="selectModel('${model.id}')">
-        <div class="model-header">
-          <span class="model-name">${model.name}</span>
-          ${badge}${offlineBadge}
-        </div>
-      </div>
-    `;
-  }).join('');
+  const filter = appState.modelFilter;
+  const newestId = all[0] ? all[0].id : null;
+  const recommended = filter ? [] : pickRecommended(all);
+  const rest = all.filter((m) => !recommended.includes(m) && modelMatchesFilter(m, filter));
+
+  if (filter && rest.length === 0) {
+    grid.innerHTML = `<div class="model-grid-message"><p>No ${MODE_TITLE[appState.mode]} model matches “${escapeHTML(filter)}”.</p></div>`;
+    return;
+  }
+
+  // Keep the full list folded until it is wanted: the default view is the
+  // recommended row and the prompt, which is where most sessions start. A
+  // search, or a selection that isn't in the recommended row, opens it.
+  const selectedInRest = appState.selectedModel && rest.some((m) => m.id === appState.selectedModel.id);
+  const expanded = !!filter || appState.showAllModels || selectedInRest;
+
+  let html = '';
+  if (recommended.length) {
+    html += `<div class="model-group-head"><span>Recommended</span><span class="model-group-hint">Venice&rsquo;s picks for ${MODE_TITLE[appState.mode]}</span></div>`;
+    html += recommended.map((m) => modelCardHTML(m, m.id === newestId)).join('');
+  }
+  if (rest.length) {
+    html += `<button type="button" class="model-group-head model-group-toggle${expanded ? ' expanded' : ''}" onclick="toggleAllModels()" aria-expanded="${expanded}">
+        <span>${filter ? 'Matches' : 'All models'} <span class="model-group-caret">&#9662;</span></span>
+        <span class="model-group-hint">${rest.length} &middot; newest first</span>
+      </button>`;
+    if (expanded) html += rest.map((m) => modelCardHTML(m, m.id === newestId)).join('');
+  }
+  grid.innerHTML = html;
+
+  // Keep the current selection highlighted across a re-render (e.g. filtering).
+  if (appState.selectedModel) {
+    document.querySelectorAll('.model-card').forEach((card) => {
+      card.classList.toggle('selected', card.dataset.modelId === appState.selectedModel.id);
+    });
+  }
 }
 
 // Select Model
 function selectModel(modelId) {
-  const models = MODELS[appState.mode];
-  const model = models.find(m => m.id === modelId);
-
+  const model = (MODELS[appState.mode] || []).find((m) => m.id === modelId);
   if (!model) return;
 
   appState.selectedModel = model;
+  appState.caps = model.caps;
 
-  // Update UI
-  document.querySelectorAll('.model-card').forEach(card => {
+  document.querySelectorAll('.model-card').forEach((card) => {
     card.classList.toggle('selected', card.dataset.modelId === modelId);
   });
 
-  // Update duration pills (use constraints from API)
-  const durations = model.durations && model.durations.length > 0 ? model.durations : [];
-  renderDurationPills(durations);
-
-  // Update resolution pills (use constraints from API)
-  const resolutions = model.resolutions && model.resolutions.length > 0 ? model.resolutions : [];
-  renderResolutionPills(resolutions);
-
-  // Update aspect ratio pills based on model constraints
-  renderAspectRatioPills(model.aspectRatios || []);
-
-  // Show/hide audio toggle. Audio defaults ON for models that support it.
-  document.getElementById('audio-toggle').classList.toggle('hidden', !model.audio);
-  const audioCheckbox = document.getElementById('audio-checkbox');
-  if (audioCheckbox && model.audio) audioCheckbox.checked = true;
-
-  // Reference-to-video models use the image as a character/scene reference.
-  const refHint = document.getElementById('reference-hint');
-  if (refHint) refHint.classList.toggle('hidden', !model.requiresReference);
-  const imgLabel = document.getElementById('image-label');
-  if (imgLabel) imgLabel.textContent = model.requiresReference ? 'Reference Image' : 'Source Image';
-
-  // Update selected model info
+  applyCapabilities(model.caps);
   updateSelectedModelInfo(model);
+}
+
+// Show exactly the controls the selected model accepts, and nothing else.
+// Every branch here is driven by VeniceAPI.capabilities(), which is derived
+// from the model's own published constraints.
+function applyCapabilities(caps) {
+  const show = (id, on) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = on ? '' : 'none';
+  };
+  const toggleHidden = (id, hidden) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('hidden', hidden);
+  };
+
+  if (!caps) {
+    renderDurationPills([]);
+    renderResolutionPills([]);
+    renderAspectRatioPills([]);
+    show('upscale-section', false);
+    toggleHidden('audio-toggle', true);
+    toggleHidden('audio-always-on', true);
+    Object.keys(LANES).forEach((lane) => toggleHidden('lane-' + lane, lane !== 'image'));
+    toggleHidden('ref-extra-lanes', true);
+    renderAllLanes();
+    refreshTagUI();
+    return;
+  }
+
+  // Duration / aspect ratio.
+  renderDurationPills(caps.durations);
+  renderAspectRatioPills(caps.aspectRatios);
+
+  // Resolution, or the upscale factor that replaces it.
+  if (caps.isUpscale) {
+    renderResolutionPills([]);
+    renderUpscalePills(caps.upscaleFactors);
+  } else {
+    show('upscale-section', false);
+    appState.selectedUpscaleFactor = null;
+    renderResolutionPills(caps.resolutions);
+  }
+
+  // Audio: a switch only where the model actually accepts the `audio` flag.
+  toggleHidden('audio-toggle', !caps.audioToggle);
+  toggleHidden('audio-always-on', !(caps.producesAudio && !caps.audioToggle));
+  const audioCheckbox = document.getElementById('audio-checkbox');
+  if (audioCheckbox && caps.audioToggle) audioCheckbox.checked = true;
+
+  // Reference lanes.
+  Object.keys(LANES).forEach((lane) => {
+    const max = laneMax(lane);
+    toggleHidden('lane-' + lane, max === 0);
+    const maxEl = document.getElementById('lane-' + lane + '-max');
+    if (maxEl) maxEl.textContent = String(max);
+    // Drop anything past the new cap so the numbering can't outrun the model.
+    if (appState.refSlots[lane].length > max) {
+      const dropped = appState.refSlots[lane].length - max;
+      appState.refSlots[lane] = appState.refSlots[lane].slice(0, max);
+      syncLaneTextarea(lane);
+      showToast(max === 0
+        ? `${appState.selectedModel.name} does not accept ${lane} references — ${dropped} removed`
+        : `${appState.selectedModel.name} takes at most ${max} ${lane} reference${max === 1 ? '' : 's'} — ${dropped} removed`,
+        'warning');
+    }
+  });
+
+  const extra = document.getElementById('ref-extra-lanes');
+  if (extra) extra.classList.toggle('hidden', laneMax('video') === 0 && laneMax('audio') === 0);
+
+  const laneTitle = document.getElementById('lane-image-title');
+  if (laneTitle) laneTitle.textContent = caps.imageLane.label;
+  const laneField = document.getElementById('lane-image-field');
+  if (laneField) laneField.textContent = caps.imageLane.field + '[]';
+  const laneHint = document.getElementById('lane-image-hint');
+  if (laneHint) {
+    laneHint.textContent = caps.refImageMinShortSide
+      ? `PNG / JPG / WEBP — this model needs at least ${caps.refImageMinShortSide}px on the short side`
+      : 'PNG / JPG / WEBP — faces, scenery, characters';
+  }
+
+  // Advanced fields, each gated on a published capability.
+  show('end-image-section', caps.endImage !== 'none');
+  const endHint = document.getElementById('end-image-hint');
+  if (endHint) endHint.textContent = caps.endImage === 'required' ? '(required — this is a transition model)' : '(optional)';
+  show('audio-url-section', caps.audioInput);
+  show('ref-video-duration-section', caps.supportsReferenceVideoDuration);
+  show('negative-prompt-section', caps.supportsNegativePrompt);
+  show('seed-section', caps.supportsSeed);
+
+  // Prompt: length limit and, for upscale models, no prompt at all.
+  const promptEl = document.getElementById(PROMPT_FIELD[appState.mode]);
+  if (promptEl) {
+    promptEl.disabled = !caps.supportsPrompt;
+    promptEl.placeholder = caps.supportsPrompt
+      ? promptEl.dataset.placeholder || promptEl.placeholder
+      : 'This model upscales the source clip — no prompt needed.';
+  }
+  updatePromptCounters(caps.promptLimit);
+
+  renderAllLanes();
+  refreshTagUI();
 }
 
 // Render aspect ratio pills from the model's advertised ratios.
@@ -743,60 +1102,106 @@ function renderAspectRatioPills(ratios) {
     : (ratios.includes('16:9') ? '16:9' : ratios[0]);
   appState.selectedAspectRatio = selected;
 
-  container.innerHTML = ratios.map(r => `
-    <button type="button" class="param-pill ${r === selected ? 'selected' : ''}" data-ratio="${r}" onclick="selectAspectRatio('${r}')">${r}</button>
+  container.innerHTML = ratios.map((r) => `
+    <button type="button" class="param-pill ${r === selected ? 'selected' : ''}" data-ratio="${escapeAttr(r)}" onclick="selectAspectRatio('${escapeAttr(r)}')">${escapeHTML(r)}</button>
   `).join('');
 }
 
 // Select Aspect Ratio
 function selectAspectRatio(ratio) {
   appState.selectedAspectRatio = ratio;
-  document.querySelectorAll('#aspect-pills .param-pill').forEach(pill => {
+  document.querySelectorAll('#aspect-pills .param-pill').forEach((pill) => {
     pill.classList.toggle('selected', pill.dataset.ratio === ratio);
   });
 }
 
-// Render Duration Pills
+// Render Duration Pills.
+// Durations stay strings end to end ("5s", "Auto"): the edit and upscale
+// models advertise the literal 'Auto', which parsing to a number destroyed.
 function renderDurationPills(durations) {
   const container = document.getElementById('duration-pills');
+  const section = document.getElementById('duration-section');
+  if (!container) return;
+
   if (!durations || durations.length === 0) {
-    container.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem;">No duration options available</p>';
+    if (section) section.style.display = 'none';
+    container.innerHTML = '';
     appState.selectedDuration = null;
     return;
   }
-  container.innerHTML = durations.map((d, i) => `
-    <button type="button" class="param-pill ${i === 0 ? 'selected' : ''}" data-duration="${d}" onclick="selectDuration(${d})">${d}s</button>
-  `).join('');
-  appState.selectedDuration = durations[0];
+  if (section) section.style.display = '';
+
+  const selected = durations.includes(appState.selectedDuration) ? appState.selectedDuration : durations[0];
+  appState.selectedDuration = selected;
+  container.innerHTML = durations.map((d) => {
+    const label = String(d).toLowerCase() === 'auto' ? 'Auto' : String(d);
+    return `<button type="button" class="param-pill ${d === selected ? 'selected' : ''}" data-duration="${escapeAttr(d)}" onclick="selectDuration('${escapeAttr(d)}')">${escapeHTML(label)}</button>`;
+  }).join('');
 }
 
 // Render Resolution Pills
 function renderResolutionPills(resolutions) {
   const container = document.getElementById('resolution-pills');
+  const section = document.getElementById('resolution-section');
+  if (!container) return;
+
   if (!resolutions || resolutions.length === 0) {
-    container.innerHTML = '<p style="color: var(--text-muted); font-size: 0.9rem;">No resolution options available</p>';
+    if (section) section.style.display = 'none';
+    container.innerHTML = '';
     appState.selectedResolution = null;
     return;
   }
-  container.innerHTML = resolutions.map((r, i) => `
-    <button type="button" class="param-pill ${i === 0 ? 'selected' : ''}" data-resolution="${r}" onclick="selectResolution('${r}')">${r}</button>
+  if (section) section.style.display = '';
+
+  const selected = resolutions.includes(appState.selectedResolution) ? appState.selectedResolution : resolutions[0];
+  appState.selectedResolution = selected;
+  container.innerHTML = resolutions.map((r) => `
+    <button type="button" class="param-pill ${r === selected ? 'selected' : ''}" data-resolution="${escapeAttr(r)}" onclick="selectResolution('${escapeAttr(r)}')">${escapeHTML(r)}</button>
   `).join('');
-  appState.selectedResolution = resolutions[0];
+}
+
+// Upscale models take `upscale_factor` in place of `resolution`.
+function renderUpscalePills(factors) {
+  const container = document.getElementById('upscale-pills');
+  const section = document.getElementById('upscale-section');
+  if (!container || !section) return;
+
+  if (!factors || factors.length === 0) {
+    section.style.display = 'none';
+    container.innerHTML = '';
+    appState.selectedUpscaleFactor = null;
+    return;
+  }
+  section.style.display = '';
+
+  const selected = factors.includes(appState.selectedUpscaleFactor) ? appState.selectedUpscaleFactor : factors[0];
+  appState.selectedUpscaleFactor = selected;
+  container.innerHTML = factors.map((f) => `
+    <button type="button" class="param-pill ${f === selected ? 'selected' : ''}" data-factor="${f}" onclick="selectUpscaleFactor(${f})">${f}&times;</button>
+  `).join('');
 }
 
 // Select Duration
 function selectDuration(duration) {
   appState.selectedDuration = duration;
-  document.querySelectorAll('#duration-pills .param-pill').forEach(pill => {
-    pill.classList.toggle('selected', parseInt(pill.dataset.duration) === duration);
+  document.querySelectorAll('#duration-pills .param-pill').forEach((pill) => {
+    pill.classList.toggle('selected', pill.dataset.duration === String(duration));
   });
 }
 
 // Select Resolution
 function selectResolution(resolution) {
   appState.selectedResolution = resolution;
-  document.querySelectorAll('#resolution-pills .param-pill').forEach(pill => {
+  document.querySelectorAll('#resolution-pills .param-pill').forEach((pill) => {
     pill.classList.toggle('selected', pill.dataset.resolution === resolution);
+  });
+}
+
+// Select Upscale Factor
+function selectUpscaleFactor(factor) {
+  appState.selectedUpscaleFactor = factor;
+  document.querySelectorAll('#upscale-pills .param-pill').forEach((pill) => {
+    pill.classList.toggle('selected', parseInt(pill.dataset.factor, 10) === factor);
   });
 }
 
@@ -806,37 +1211,72 @@ function randomizeSeed() {
   if (seed) seed.value = Math.floor(Math.random() * 2147483647);
 }
 
-// Update Selected Model Info
+// Update Selected Model Info — the sidebar summary of what this model accepts.
 function updateSelectedModelInfo(model) {
   const container = document.getElementById('selected-model-info');
-  const durStr = model.durations.length ? model.durations.join(', ') + 's' : '';
-  const resStr = model.resolutions.length ? model.resolutions.join(', ') : '';
+  const caps = model.caps;
+  const tags = [];
+
+  if (caps.durations.length) tags.push(formatDurationRange(caps.durations));
+  if (caps.isUpscale) tags.push(caps.upscaleFactors.map((f) => f + '×').join(' / ') + ' upscale');
+  else if (caps.resolutions.length) tags.push(caps.resolutions.join(', '));
+  if (caps.aspectRatios.length) tags.push(caps.aspectRatios.length + ' aspect ratios');
+
+  const featureTags = [];
+  if (caps.producesAudio) featureTags.push(caps.audioToggle ? 'Audio (optional)' : 'Audio (always on)');
+  if (caps.audioInput) featureTags.push('Audio track in');
+  if (caps.elementLane) featureTags.push('@Element refs');
+  if (caps.endImage === 'required') featureTags.push('End frame required');
+  if (caps.promptLimit !== 5000) featureTags.push(`Prompt ≤ ${caps.promptLimit}`);
+  if (caps.refImageMinShortSide) featureTags.push(`Refs ≥ ${caps.refImageMinShortSide}px`);
+
   container.innerHTML = `
-    <p class="selected-model-name">${model.name}</p>
-    <p class="selected-model-id">${model.id}</p>
+    <p class="selected-model-name">${escapeHTML(model.name)}</p>
+    <p class="selected-model-id">${escapeHTML(model.id)}</p>
     <div class="selected-model-tags">
-      ${durStr ? `<span class="feature-tag">${durStr}</span>` : ''}
-      ${resStr ? `<span class="feature-tag">${resStr}</span>` : ''}
-      ${model.audio ? '<span class="feature-tag audio">Audio</span>' : ''}
+      ${tags.map((t) => `<span class="feature-tag">${escapeHTML(t)}</span>`).join('')}
+      ${featureTags.map((t) => `<span class="feature-tag audio">${escapeHTML(t)}</span>`).join('')}
     </div>
   `;
 }
 
-// Setup Prompt Counter
-function setupPromptCounter() {
-  const textarea = document.getElementById('prompt');
-  const counter = document.getElementById('prompt-counter');
+// Wire up every prompt field: live counter, tag warnings, and canonicalising
+// whatever @-tag spelling the user typed the moment they leave the field.
+function setupPromptFields() {
+  Object.entries(PROMPT_FIELD).forEach(([mode, id]) => {
+    const textarea = document.getElementById(id);
+    if (!textarea) return;
+    textarea.dataset.placeholder = textarea.placeholder;
 
-  if (textarea && counter) {
     textarea.addEventListener('input', () => {
-      const len = textarea.value.length;
-      counter.textContent = `${len} / 5000`;
-      counter.classList.toggle('near-limit', len > 4500 && len <= 5000);
-      counter.classList.toggle('over-limit', len > 5000);
+      updatePromptCounters(appState.caps ? appState.caps.promptLimit : 5000);
+      refreshTagUI();
     });
-  }
 
-  // Models are loaded automatically on initialization (no token input needed)
+    textarea.addEventListener('blur', () => {
+      const canonical = RefTags.normalize(textarea.value);
+      if (canonical !== textarea.value) {
+        textarea.value = canonical;
+        showToast('Reference tags rewritten to the form the API expects', 'info');
+        refreshTagUI();
+      }
+    });
+  });
+  updatePromptCounters(5000);
+}
+
+// Counter under each prompt, using the selected model's own character limit.
+function updatePromptCounters(limit) {
+  const max = limit || 5000;
+  Object.values(PROMPT_FIELD).forEach((id) => {
+    const textarea = document.getElementById(id);
+    const counter = document.getElementById(id + '-counter');
+    if (!textarea || !counter) return;
+    const length = textarea.value.length;
+    counter.textContent = `${length} / ${max}`;
+    counter.classList.toggle('near-limit', length > max * 0.9 && length <= max);
+    counter.classList.toggle('over-limit', length > max);
+  });
 }
 
 // Toggle Token Visibility - REMOVED (API token is now on server)
@@ -970,7 +1410,8 @@ function removeImage(e) {
   document.getElementById('image-upload').value = '';
 }
 
-// Validation
+// Validation — gated on the selected model's own capabilities, so a field is
+// only ever demanded when that model actually needs it.
 function validateForm() {
   const errors = {};
 
@@ -979,40 +1420,56 @@ function validateForm() {
     return false;
   }
 
-  if (appState.mode === 'text-to-video') {
-    const prompt = document.getElementById('prompt').value.trim();
-    if (!prompt) {
-      errors['prompt'] = 'Prompt is required';
-    } else if (prompt.length > 5000) {
-      errors['prompt'] = 'Prompt must be 5000 characters or less';
-    }
-  } else if (appState.mode === 'video-to-video') {
-    // Codex P1 fix: V2V mode has its own gate -- it doesn't need an image,
-    // an #motion-prompt, or ref-image urls from the image panel.
-    if (!appState.uploadedVideoUrl) {
-      errors['video-url'] = 'Please upload a source video';
-    }
-    const motionPrompt = document.getElementById('video-motion-prompt').value.trim();
-    if (!motionPrompt) {
-      errors['video-motion-prompt'] = 'Motion prompt is required for video-to-video';
-    }
-  } else {
-    // image-to-video / reference-to-video
-    const refImgEl = document.getElementById('ref-image-urls');
-    const refVidEl = document.getElementById('ref-video-urls');
-    const hasRefUrls = (refImgEl && refImgEl.value.trim()) || (refVidEl && refVidEl.value.trim());
-    if (!appState.uploadedImageUrl && !hasRefUrls) {
-      errors['image-url'] = appState.selectedModel && appState.selectedModel.requiresReference
-        ? 'Please upload an image or add reference image/video URLs'
-        : 'Please upload an image';
-    }
-    const motionPrompt = document.getElementById('motion-prompt').value.trim();
-    if (!motionPrompt) {
-      errors['motion-prompt'] = 'Motion prompt is required for image-to-video';
+  const caps = appState.caps;
+  const promptId = PROMPT_FIELD[appState.mode];
+  const promptEl = document.getElementById(promptId);
+  const promptText = promptEl ? promptEl.value.trim() : '';
+
+  if (caps.supportsPrompt) {
+    if (!promptText) {
+      errors[promptId] = appState.mode === 'text-to-video'
+        ? 'Prompt is required'
+        : 'A motion prompt is required for this model';
+    } else if (promptText.length > caps.promptLimit) {
+      errors[promptId] = `${appState.selectedModel.name} caps the prompt at ${caps.promptLimit} characters`;
     }
   }
 
-  // Show errors
+  if (appState.mode === 'image-to-video') {
+    if (!appState.uploadedImageUrl) {
+      errors['image-url'] = 'Please upload a source image';
+    }
+    if (caps.endImage === 'required' && !document.getElementById('end-image-url').value.trim()) {
+      errors['end-image-url'] = 'This transition model also needs an end frame image URL (Advanced options)';
+    }
+  } else if (appState.mode === 'reference-to-video') {
+    const refCount = appState.refSlots.image.length + appState.refSlots.element.length + appState.refSlots.video.length;
+    if (refCount === 0) {
+      errors[promptId] = 'Attach at least one reference before generating';
+      showToast('Drop a reference image below the model list to get started', 'warning');
+    }
+    if (appState.refSlots.audio.length && !appState.refSlots.image.length && !appState.refSlots.element.length && !appState.refSlots.video.length) {
+      errors[promptId] = 'Reference audio has to accompany an image or video reference';
+    }
+  } else if (appState.mode === 'video-to-video') {
+    if (!appState.uploadedVideoUrl) {
+      errors['video-url'] = 'Please upload a source video';
+    }
+  }
+
+  // A tag pointing at an empty slot reaches the model as literal text, which
+  // is never what the user meant.
+  if (promptText) {
+    const report = RefTags.audit(promptText, {
+      image: appState.refSlots.image.length,
+      element: (caps && caps.elementLane) ? appState.refSlots.element.length : 0
+    });
+    if (report.dangling.length) {
+      const list = report.dangling.map((d) => RefTags.label(d.kind, d.n)).join(', ');
+      errors[promptId] = `${list} has no reference attached — add it or remove the tag`;
+    }
+  }
+
   Object.entries(errors).forEach(([field, message]) => {
     const errorEl = document.getElementById(`${field}-error`);
     if (errorEl) {
@@ -1020,19 +1477,19 @@ function validateForm() {
       errorEl.style.display = 'block';
     }
     const inputEl = document.getElementById(field);
-    if (inputEl) {
-      inputEl.classList.add('input-error');
-    }
+    if (inputEl) inputEl.classList.add('input-error');
   });
 
-  // Clear errors on input
-  document.querySelectorAll('.form-input, .form-textarea').forEach(input => {
+  if (Object.keys(errors).length) {
+    const first = Object.values(errors)[0];
+    showToast(first, 'warning');
+  }
+
+  document.querySelectorAll('.form-input, .form-textarea').forEach((input) => {
     input.addEventListener('input', () => {
       input.classList.remove('input-error');
       const errorEl = document.getElementById(`${input.id}-error`);
-      if (errorEl) {
-        errorEl.style.display = 'none';
-      }
+      if (errorEl) errorEl.style.display = 'none';
     }, { once: true });
   });
 
@@ -1043,85 +1500,88 @@ function validateForm() {
 // Shared by Generate and Estimate so the two never drift apart.
 function buildGenerationParams() {
   const model = appState.selectedModel;
+  const caps = appState.caps;
   const params = {
     model: model.id,
     modelConstraints: model.constraints // used for per-model validation/filtering
   };
 
-  // Aspect ratio - only when the model supports it.
-  const ratios = model.aspectRatios || [];
-  if (ratios.length > 0) {
-    params.aspect_ratio = ratios.includes(appState.selectedAspectRatio)
+  if (caps.aspectRatios.length > 0) {
+    params.aspect_ratio = caps.aspectRatios.includes(appState.selectedAspectRatio)
       ? appState.selectedAspectRatio
-      : ratios[0];
+      : caps.aspectRatios[0];
   }
 
-  // Duration / resolution (validated again in the API layer).
   if (appState.selectedDuration) params.duration = appState.selectedDuration;
-  if (appState.selectedResolution) params.resolution = appState.selectedResolution;
+  if (caps.isUpscale) {
+    if (appState.selectedUpscaleFactor) params.upscale_factor = appState.selectedUpscaleFactor;
+  } else if (appState.selectedResolution) {
+    params.resolution = appState.selectedResolution;
+  }
 
-  // Audio - only when the model can generate it.
-  if (model.audio) {
+  if (caps.audioToggle) {
     const audioEl = document.getElementById('audio-checkbox');
     params.audio = !!(audioEl && audioEl.checked);
   }
 
-  // Advanced options.
-  const neg = document.getElementById('negative-prompt');
-  if (neg && neg.value.trim()) params.negative_prompt = neg.value.trim();
-  const seed = document.getElementById('seed-input');
-  if (seed && seed.value.trim() !== '') params.seed = seed.value.trim();
-
-  // Parse a textarea/input of URLs separated by newlines or commas.
-  const parseUrlList = (id) => {
-    const el = document.getElementById(id);
-    if (!el || !el.value.trim()) return [];
-    return el.value.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
-  };
   const oneUrl = (id) => {
     const el = document.getElementById(id);
     return el && el.value.trim() ? el.value.trim() : '';
   };
 
-  // Advanced reference / media fields (each maps to a Venice video-queue param).
-  const refImageUrls = parseUrlList('ref-image-urls');
-  const refVideoUrls = parseUrlList('ref-video-urls');
-  const refAudioUrls = parseUrlList('ref-audio-urls');
-  const endImageUrl = oneUrl('end-image-url');
-  const refVideoDur = document.getElementById('ref-video-duration');
-
-  if (refVideoUrls.length) params.reference_video_urls = refVideoUrls;
-  if (refAudioUrls.length) params.reference_audio_urls = refAudioUrls;
-  if (endImageUrl) params.end_image_url = endImageUrl;
-  if (refVideoDur && refVideoDur.value.trim() !== '') {
-    params.reference_video_total_duration = refVideoDur.value.trim();
+  if (caps.supportsNegativePrompt) {
+    const neg = document.getElementById('negative-prompt');
+    if (neg && neg.value.trim()) params.negative_prompt = neg.value.trim();
+  }
+  if (caps.supportsSeed) {
+    const seed = document.getElementById('seed-input');
+    if (seed && seed.value.trim() !== '') params.seed = seed.value.trim();
   }
 
-  // Prompt + primary visual input. Four modes share the same params API;
-  // only the field ids and primary input channel differ.
-  if (appState.mode === 'text-to-video') {
-    params.prompt = document.getElementById('prompt').value.trim();
-    if (refImageUrls.length) params.reference_image_urls = refImageUrls;
+  // Reference lanes -> the request arrays they are numbered against. The
+  // order of each lane is exactly the order the prompt's @-tags address.
+  const laneUrls = (lane) => appState.refSlots[lane].map((s) => s.url);
+  const images = laneUrls('image');
+  if (images.length) {
+    params[caps.imageLane.field] = images;
+  }
+  if (caps.elementLane && appState.refSlots.element.length) {
+    params.elements = appState.refSlots.element.map((s) => ({ frontal_image_url: s.url }));
+  }
+  if (caps.maxReferenceVideos && appState.refSlots.video.length) {
+    params.reference_video_urls = laneUrls('video');
+  }
+  if (caps.maxReferenceAudio && appState.refSlots.audio.length) {
+    params.reference_audio_urls = laneUrls('audio');
+  }
+
+  if (caps.endImage !== 'none') {
+    const endImageUrl = oneUrl('end-image-url');
+    if (endImageUrl) params.end_image_url = endImageUrl;
+  }
+  if (caps.audioInput) {
+    const audioUrl = oneUrl('audio-url');
+    if (audioUrl) params.audio_url = audioUrl;
+  }
+  if (caps.supportsReferenceVideoDuration) {
+    const refVideoDur = document.getElementById('ref-video-duration');
+    if (refVideoDur && refVideoDur.value.trim() !== '') {
+      params.reference_video_total_duration = refVideoDur.value.trim();
+    }
+  }
+
+  // Prompt + primary visual input, per tab. The prompt is canonicalised here
+  // too, so a tag typed as "@image 2" still reaches Venice as "@Image2" even
+  // if the field never lost focus.
+  const promptEl = document.getElementById(PROMPT_FIELD[appState.mode]);
+  if (caps.supportsPrompt && promptEl) {
+    params.prompt = RefTags.normalize(promptEl.value.trim());
+  }
+
+  if (appState.mode === 'image-to-video') {
+    if (appState.uploadedImageUrl) params.image_url = appState.uploadedImageUrl;
   } else if (appState.mode === 'video-to-video') {
     params.video_url = appState.uploadedVideoUrl || '';
-    const el = document.getElementById('video-motion-prompt');
-    params.prompt = (el && el.value || '').trim();
-    // Codex fix: forward reference_image_urls to V2V-aware models
-    // (Wan Edit, Grok V2V Private, HappyHorse Edit). Documented in api.js
-    // buildRequestBody V2V branch.
-    if (refImageUrls.length) params.reference_image_urls = refImageUrls;
-  } else {
-    const uploaded = appState.uploadedImageUrl || '';
-    if (model.requiresReference) {
-      const all = [];
-      if (uploaded) all.push(uploaded);
-      all.push(...refImageUrls);
-      params.reference_image_urls = all;
-    } else {
-      if (uploaded) params.image_url = uploaded;
-      if (refImageUrls.length) params.reference_image_urls = refImageUrls;
-    }
-    params.prompt = document.getElementById('motion-prompt').value.trim();
   }
 
   return params;
