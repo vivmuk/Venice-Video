@@ -1,3 +1,8 @@
+function getApiKey() {
+  if (typeof window !== 'undefined' && window.getVeniceKey) return window.getVeniceKey() || null;
+  return null;
+}
+
 // Venice Video API Integration Class
 // Now uses server-side proxy endpoints (API token is stored on server)
 
